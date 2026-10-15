@@ -1,0 +1,145 @@
+# Reusable CI gate for a Node app. Callers use job id `ci`, so the contexts a ruleset requires are `ci / checks`, `ci / pr-title` and `ci / skills`.
+# Two rules hold the gate together (README §Why):
+#   - no job here sets `name:` — it would replace the id in the reported context and the ruleset would wait forever;
+#   - `checks` and `skills` are never conditioned at job level — a skipped job reports success for the same head sha, so a title edit after a red run
+#     would turn the PR green.
+name: ci-node
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        default: '22'
+      install-command:
+        description: Overrides lockfile detection when set.
+        type: string
+        default: ''
+      check-commands:
+        description: Newline-separated; each runs on its own and a failure names it.
+        type: string
+        required: true
+      skills-command:
+        description: Optional extra suite, run only when the PR touches skills-paths.
+        type: string
+        default: ''
+      skills-paths:
+        description: Newline-separated path patterns (bash [[ == ]] syntax, so ** spans directories).
+        type: string
+        default: ''
+      kit-ref:
+        description: The release-kit ref the pr-title checker is taken from; keep it equal to the caller's uses ref.
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Install
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          corepack enable
+          if [ -n "$INSTALL_COMMAND" ]; then
+            bash -c "$INSTALL_COMMAND"
+          elif [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "no lockfile — install skipped"
+          fi
+      - name: Checks
+        env:
+          CHECK_COMMANDS: ${{ inputs.check-commands }}
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          while IFS= read -r cmd; do
+            [ -n "${cmd// /}" ] || continue
+            echo "::group::$cmd"
+            if ! bash -c "$cmd"; then
+              echo "::endgroup::"
+              echo "::error::check failed: $cmd"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done <<< "$CHECK_COMMANDS"
+
+  pr-title:
+    runs-on: ubuntu-latest
+    # On push there is no title to check; a skipped job reports success, which is right here and only here.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: futin/release-kit
+          ref: ${{ inputs.kit-ref }}
+          path: .release-kit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Check PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node .release-kit/scripts/pr-title.mjs
+
+  skills:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decide
+        id: decide
+        env:
+          SKILLS_COMMAND: ${{ inputs.skills-command }}
+          SKILLS_PATHS: ${{ inputs.skills-paths }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          run=false
+          if [ -z "$SKILLS_COMMAND" ]; then
+            echo "no skills suite"
+          elif [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "push — skills gate is PR-only"
+          else
+            changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+            while IFS= read -r pattern; do
+              [ -n "$pattern" ] || continue
+              while IFS= read -r file; do
+                # shellcheck disable=SC2053 — the pattern is meant to match, not compare literally.
+                if [[ -n "$file" && $file == $pattern ]]; then run=true; fi
+              done <<< "$changed"
+            done <<< "$SKILLS_PATHS"
+            [ "$run" = true ] || echo "no changed file matches skills-paths — skills suite not needed"
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+      - if: steps.decide.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Skills suite
+        if: steps.decide.outputs.run == 'true'
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+          SKILLS_COMMAND: ${{ inputs.skills-command }}
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          corepack enable
+          if [ -n "$INSTALL_COMMAND" ]; then
+            bash -c "$INSTALL_COMMAND"
+          elif [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
+            npm ci
+          fi
+          bash -c "$SKILLS_COMMAND"

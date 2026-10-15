@@ -1,0 +1,23 @@
+# release-kit's own CI, through the same reusable workflow every app calls. The pr-title checker comes from the branch under review, not from v1.
+name: ci
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci-node.yml
+    with:
+      check-commands: node --test 'test/**/*.test.mjs'
+      kit-ref: ${{ github.head_ref || github.ref_name }}
