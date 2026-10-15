@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { yamlSkip } from './yaml-gate.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const WF = name => path.join(ROOT, '.github/workflows', name);
@@ -11,7 +12,7 @@ const WF = name => path.join(ROOT, '.github/workflows', name);
 // BaseLoader keeps every scalar a string and, unlike the default loaders, does not read the bare key `on` as boolean true.
 const LOADER = 'import sys, json, yaml; print(json.dumps(yaml.load(sys.stdin, Loader=yaml.BaseLoader)))';
 const yamlAvailable = spawnSync('python3', ['-c', 'import yaml'], { encoding: 'utf8' }).status === 0;
-const skip = yamlAvailable ? false : 'python3 with PyYAML is not available';
+const skip = yamlSkip({ available: yamlAvailable, env: process.env });
 
 function load(name) {
   const r = spawnSync('python3', ['-c', LOADER], { input: readFileSync(WF(name), 'utf8'), encoding: 'utf8' });
