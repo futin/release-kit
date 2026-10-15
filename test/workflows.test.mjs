@@ -93,3 +93,11 @@ test('self.yml calls ci-node.yml from a job whose id is ci', { skip }, () => {
   assert.equal(jobs.ci.uses, './.github/workflows/ci-node.yml');
   assert.match(jobs.ci.with['check-commands'], /node --test 'test\/\*\*\/\*\.test\.mjs'/);
 });
+
+test('every setup-node step turns off its package-manager cache (it runs before corepack puts pnpm on PATH)', { skip }, () => {
+  for (const [id, job] of Object.entries(load('ci-node.yml').jobs)) {
+    for (const step of job.steps.filter(s => (s.uses ?? '').startsWith('actions/setup-node@'))) {
+      assert.equal(step.with?.['package-manager-cache'], 'false', `ci-node.yml job ${id}: setup-node would look for the packageManager binary`);
+    }
+  }
+});

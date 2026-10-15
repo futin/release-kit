@@ -43,6 +43,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
+          # v5 defaults this on, and it then looks for the packageManager binary (pnpm) before corepack has installed it.
+          package-manager-cache: false
       - name: Install
         env:
           INSTALL_COMMAND: ${{ inputs.install-command }}
@@ -87,6 +89,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
+          # v5 defaults this on, and it then looks for the packageManager binary (pnpm) before corepack has installed it.
+          package-manager-cache: false
       - name: Check PR title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -127,6 +131,8 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
+          # v5 defaults this on, and it then looks for the packageManager binary (pnpm) before corepack has installed it.
+          package-manager-cache: false
       - name: Skills suite
         if: steps.decide.outputs.run == 'true'
         env:
