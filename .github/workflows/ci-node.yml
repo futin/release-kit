@@ -39,8 +39,8 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
       - name: Install
@@ -79,12 +79,12 @@ jobs:
     # On push there is no title to check; a skipped job reports success, which is right here and only here.
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: futin/release-kit
           ref: ${{ inputs.kit-ref }}
           path: .release-kit
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
       - name: Check PR title
@@ -95,7 +95,7 @@ jobs:
   skills:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Decide
@@ -124,7 +124,7 @@ jobs:
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
       - if: steps.decide.outputs.run == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
       - name: Skills suite
