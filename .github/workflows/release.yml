@@ -1,0 +1,53 @@
+# Reusable release workflow: tags every unreleased feat|fix|perf PR merged to main and publishes its GitHub Release (README §Adopting releases).
+# Two rules hold it together:
+#   - a PR title, body or release note never appears inside `run:` through `${{ }}` — they reach `gh` and `git` only as argv elements or files read by
+#     the CLI, so text such as `$(id)` stays text;
+#   - the permissions are `contents: write` (tag push, Release) and `pull-requests: read`; setting `contents` alone drops `pull-requests` to none, and the
+#     PR lookup then fails on a private repo.
+name: release
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: The commit to release up to; the caller's push sha when empty.
+        type: string
+        default: ''
+      kit-ref:
+        description: The release-kit ref the CLI is taken from; keep it equal to the caller's uses ref.
+        type: string
+        default: v1
+      node-version:
+        type: string
+        default: '22'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The range is every first-parent commit since the newest version tag, and describe has to see the tags.
+          fetch-depth: 0
+      - uses: actions/checkout@v5
+        with:
+          repository: futin/release-kit
+          ref: ${{ inputs.kit-ref }}
+          path: .release-kit
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ inputs.node-version }}
+          # v5 defaults this on, and it then looks for the packageManager binary (pnpm) before corepack has installed it.
+          package-manager-cache: false
+      - name: Tagger identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Release
+        env:
+          TARGET_SHA: ${{ inputs.sha || github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: node .release-kit/dist/esm/release-cli.js

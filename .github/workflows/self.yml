@@ -23,3 +23,14 @@ jobs:
         npm run typecheck
         npm test
       kit-ref: ${{ github.head_ref || github.ref_name }}
+
+  # The kit releases itself through the reusable workflow it ships. The concurrency group above cancels in-progress runs; for the kit that is accepted on
+  # purpose: a cancelled run leaves at worst a pushed tag without its Release, which the next run repairs.
+  release:
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      pull-requests: read
+    uses: ./.github/workflows/release.yml
+    with:
+      kit-ref: ${{ github.ref_name }}
