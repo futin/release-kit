@@ -100,10 +100,13 @@ async function main() {
         throw new Error(`TARGET_SHA must be 7-40 lowercase hex characters; got ${JSON.stringify(target)}`);
     if (!repo)
         throw new Error('GITHUB_REPOSITORY is not set');
+    const branch = process.env.DEFAULT_BRANCH ?? '';
+    if (!branch)
+        throw new Error('DEFAULT_BRANCH is not set');
     // Only a manual dispatch should hear "a newer release exists"; a re-run of a superseded push run must end green.
     const onNewer = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' ? 'reject' : 'skip';
     const log = createLog();
-    const outcomes = await runRelease({ cwd: process.cwd(), target, github: createGhPort(repo), log, onNewer });
+    const outcomes = await runRelease({ cwd: process.cwd(), target, github: createGhPort(repo), log, onNewer, trunk: `origin/${branch}` });
     for (const o of outcomes)
         log.info(`${o.sha.slice(0, 7)}: ${o.action}${o.version ? ` v${o.version}` : ''}`);
 }

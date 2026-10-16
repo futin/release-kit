@@ -44,6 +44,8 @@ const calls = (gh: string): string[][] => {
 };
 
 function runCli(repo: TestRepo, gh: string, env: Record<string, string | undefined>) {
+  // The workflow's checkout has origin/main; the fixture's bare origin is empty, so the tracking ref is set by hand to the local main.
+  spawnSync('git', ['update-ref', 'refs/remotes/origin/main', 'main'], { cwd: repo.dir });
   return spawnSync(process.execPath, ['--import', TSX, CLI], {
     cwd: repo.dir,
     encoding: 'utf8',
@@ -57,6 +59,7 @@ function runCli(repo: TestRepo, gh: string, env: Record<string, string | undefin
       GIT_CONFIG_SYSTEM: '/dev/null',
       GIT_CONFIG_NOSYSTEM: '1',
       GITHUB_EVENT_NAME: undefined,
+      DEFAULT_BRANCH: 'main',
       ...env,
     },
   });
@@ -115,6 +118,30 @@ describe('release-cli', () => {
     assert.equal(runCli(repo, gh, { TARGET_SHA: undefined }).status, 1);
     assert.equal(runCli(repo, gh, { TARGET_SHA: sha, GITHUB_REPOSITORY: undefined }).status, 1);
     assert.deepEqual(calls(gh), []);
+  });
+
+  it('rejects a missing or empty DEFAULT_BRANCH before any gh call', () => {
+    const { repo, gh } = setup();
+    const sha = repo.commit('fix: x (#1)');
+    for (const DEFAULT_BRANCH of [undefined, '']) {
+      const r = runCli(repo, gh, { TARGET_SHA: sha, DEFAULT_BRANCH });
+      assert.equal(r.status, 1);
+      assert.match(r.stdout, /^::error::.*DEFAULT_BRANCH/m);
+    }
+    assert.deepEqual(calls(gh), []);
+  });
+
+  it('fails a target that is not on origin/<DEFAULT_BRANCH> without a gh call or a tag', () => {
+    const { repo, gh } = setup();
+    spawnSync('git', ['checkout', '-q', '-b', 'side'], { cwd: repo.dir });
+    const side = repo.commit('feat: side (#4)');
+    spawnSync('git', ['checkout', '-q', 'main'], { cwd: repo.dir });
+    repo.commit('feat: a (#1)');
+    const r = runCli(repo, gh, { TARGET_SHA: side });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, new RegExp(`^::error::target ${side} is not on origin/main$`, 'm'));
+    assert.deepEqual(calls(gh), []);
+    assert.equal(spawnSync('git', ['tag', '--list', 'v0.2.0'], { cwd: repo.dir, encoding: 'utf8' }).stdout.trim(), '');
   });
 
   it('treats a 404 from the PR lookup as no PR and goes on', () => {

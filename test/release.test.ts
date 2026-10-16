@@ -72,7 +72,8 @@ async function withRepo(fn: (r: TestRepo) => Promise<void>): Promise<void> {
   }
 }
 
-const run = (r: TestRepo, f: Fake, target: string, onNewer: 'reject' | 'skip') => runRelease({ cwd: r.dir, target, github: f.port, log: log(f), onNewer });
+const run = (r: TestRepo, f: Fake, target: string, onNewer: 'reject' | 'skip', trunk = 'main') =>
+  runRelease({ cwd: r.dir, target, github: f.port, log: log(f), onNewer, trunk });
 
 test('no baseline tag reachable: nothing released, one warning, no tag pushed', async () => {
   await withRepo(async (r) => {
@@ -173,7 +174,7 @@ test('a tag whose push succeeded but whose Release failed is repaired from its o
       ...f.port,
       createRelease: () => Promise.reject(new Error('gh down')),
     };
-    await assert.rejects(runRelease({ cwd: r.dir, target: a, github: failing, log: log(f), onNewer: 'reject' }), /gh down/);
+    await assert.rejects(runRelease({ cwd: r.dir, target: a, github: failing, log: log(f), onNewer: 'reject', trunk: 'main' }), /gh down/);
     assert.deepEqual(await originTags(r), ['v0.2.0']);
 
     assert.deepEqual(await run(r, f, a, 'reject'), [{ sha: a, action: 'release-repaired', version: '0.2.0' }]);
@@ -234,6 +235,72 @@ test('of several PRs listed for a commit only the one merged as that commit is u
     const f = fake({ releases: ['v0.1.0'], pulls: { [a]: [pr(3, 'feat: other', other), pr(8, 'fix: right', a)] } });
     assert.deepEqual((await run(r, f, a, 'reject'))[1], { sha: a, action: 'released', version: '0.1.1' });
     assert.equal(f.created[0].title, 'fix: right (#8)');
+  });
+});
+
+test('a merged PR whose mergeCommitSha is another commit is not this commit\'s PR when found through the subject', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.1.0', base, BASELINE);
+    const picked = r.commit('feat: picked (#10)');
+    const f = fake({ releases: ['v0.1.0'], byNumber: { 10: pr(10, 'feat: picked', 'e'.repeat(40)) } });
+    assert.deepEqual((await run(r, f, picked, 'reject'))[1], { sha: picked, action: 'no-pr' });
+    assert.deepEqual(f.warnings, [`no PR for ${picked}`]);
+    assert.deepEqual(await originTags(r), []);
+    assert.deepEqual(f.created, []);
+  });
+});
+
+for (const mode of ['reject', 'skip'] as const) {
+  test(`onNewer ${mode}: a target that is not on the trunk rejects before anything else, with no tag and no port call`, async () => {
+    await withRepo(async (r) => {
+      const base = r.commit('chore: baseline');
+      r.tag('v0.1.0', base, BASELINE);
+      await git(r.dir, ['checkout', '-q', '-b', 'side']);
+      const side = r.commit('feat: side (#9)');
+      await git(r.dir, ['checkout', '-q', 'main']);
+      r.commit('feat: a (#1)');
+      const f = fake({ releases: ['v0.1.0'], pulls: { [side]: [pr(9, 'feat: side', side)] } });
+      await assert.rejects(run(r, f, side, mode), new RegExp(`^Error: target ${side} is not on main$`));
+      assert.deepEqual(await originTags(r), []);
+      assert.equal(f.portCalls, 0);
+      assert.deepEqual(f.created, []);
+    });
+  });
+}
+
+test('an off-trunk target is rejected even when a newer release exists', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.1.0', base, BASELINE);
+    await git(r.dir, ['checkout', '-q', '-b', 'side']);
+    const side = r.commit('feat: side (#9)');
+    r.tag('v0.2.0', r.commit('feat: later (#2)'), formatTagMessage({ title: 'feat: later', pr: 2, notes: '', type: 'feat', breaking: false }));
+    await git(r.dir, ['checkout', '-q', 'main']);
+    const f = fake();
+    await assert.rejects(run(r, f, side, 'skip'), /is not on main/);
+  });
+});
+
+test('a trunk ref that does not resolve rejects instead of reading as off-trunk or on-trunk', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.1.0', base, BASELINE);
+    const a = r.commit('feat: a (#1)');
+    const f = fake({ releases: ['v0.1.0'], pulls: { [a]: [pr(1, 'feat: a', a)] } });
+    await assert.rejects(run(r, f, a, 'reject', 'origin/nope'), (e: Error) => !/is not on/.test(e.message));
+    assert.deepEqual(await originTags(r), []);
+    assert.equal(f.portCalls, 0);
+  });
+});
+
+test('a target equal to the trunk head is on the trunk', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.1.0', base, BASELINE);
+    const a = r.commit('feat: a (#1)');
+    const f = fake({ releases: ['v0.1.0'], pulls: { [a]: [pr(1, 'feat: a', a)] } });
+    assert.deepEqual((await run(r, f, a, 'reject', a))[1], { sha: a, action: 'released', version: '0.2.0' });
   });
 });
 

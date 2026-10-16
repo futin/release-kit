@@ -50,4 +50,6 @@ jobs:
         env:
           TARGET_SHA: ${{ inputs.sha || github.sha }}
           GH_TOKEN: ${{ github.token }}
+          # A dispatch sha off the default branch is refused; the engine compares it with origin/<this>.
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node .release-kit/dist/esm/release-cli.js

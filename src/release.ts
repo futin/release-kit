@@ -55,13 +55,14 @@ async function newerRelease(cwd: string, target: string): Promise<string | null>
   return null;
 }
 
-// The call can list several PRs; only the one merged as this very commit is its PR. The subject's `(#N)` is the fallback when the API lists none.
+// The call can list several PRs; only the one merged as this very commit is its PR. The subject's `(#N)` is the fallback when the API lists none, and it holds
+// to the same rule: a cherry-picked squash subject names a PR that was merged as some other commit.
 async function findPull(github: GitHubPort, cwd: string, sha: string): Promise<PullRequest | null> {
   const listed = (await github.pullsForCommit(sha)).find((p) => p.merged && p.mergeCommitSha === sha);
   if (listed) return listed;
   const n = /\(#(\d+)\)$/.exec(await git(cwd, ['log', '-1', '--format=%s', sha]));
   const pull = n ? await github.getPull(Number(n[1])) : null;
-  return pull?.merged ? pull : null;
+  return pull?.merged && pull.mergeCommitSha === sha ? pull : null;
 }
 
 // `-F <file>`, never `-m`: a title or note can hold anything, and --cleanup=verbatim keeps the `#` lines the default cleanup would strip.
@@ -124,11 +125,13 @@ async function releaseCommit(cwd: string, github: GitHubPort, log: Log, sha: str
  * Release every first-parent commit from the newest baseline tag reachable from `target` (inclusive) up to `target`, oldest first. Resolves to one outcome
  * per commit. When a later commit already carries a version tag, `onNewer` decides: 'reject' fails with `a newer release exists: <tag>` (a manual dispatch,
  * where the operator should hear it), 'skip' resolves to `[]` after an info line (a re-run of a superseded push run, which must end green). Either way
- * nothing is tagged, because a re-run could otherwise tag a commit that was skipped as no-pr out of order.
+ * nothing is tagged, because a re-run could otherwise tag a commit that was skipped as no-pr out of order. A `target` that is not on `trunk` (a ref
+ * resolvable in `cwd`, such as `origin/main`) rejects first, in both modes: a dispatch could otherwise tag a commit that never reached the default branch.
  */
-export async function runRelease(o: { cwd: string; target: string; github: GitHubPort; log: Log; onNewer: 'reject' | 'skip' }): Promise<Outcome[]> {
+export async function runRelease(o: { cwd: string; target: string; github: GitHubPort; log: Log; onNewer: 'reject' | 'skip'; trunk: string }): Promise<Outcome[]> {
   const { cwd, github, log } = o;
   const target = await git(cwd, ['rev-parse', `${o.target}^{commit}`]);
+  if (!(await isAncestor(cwd, target, o.trunk))) throw new Error(`target ${target} is not on ${o.trunk}`);
   const newer = await newerRelease(cwd, target);
   if (newer) {
     if (o.onNewer === 'reject') throw new Error(`a newer release exists: ${newer}`);

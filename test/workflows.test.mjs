@@ -141,12 +141,13 @@ test('no run: in release.yml interpolates ${{ }} (title, body and notes are neve
   for (const run of runs(load('release.yml').jobs.release)) assert.ok(!run.includes('${{'), `run: interpolates an expression:\n${run}`);
 });
 
-test('the release CLI step gets TARGET_SHA and GH_TOKEN through env only', { skip }, () => {
+test('the release CLI step gets TARGET_SHA, GH_TOKEN and DEFAULT_BRANCH through env only', { skip }, () => {
   const step = load('release.yml').jobs.release.steps.find(s => s.run && s.run.includes('release-cli.js'));
   assert.ok(step, 'no step runs release-cli.js');
   assert.equal(step.run.trim(), 'node .release-kit/dist/esm/release-cli.js');
   assert.match(step.env.TARGET_SHA, /inputs\.sha \|\| github\.sha/);
   assert.match(step.env.GH_TOKEN, /github\.token/);
+  assert.match(step.env.DEFAULT_BRANCH, /github\.event\.repository\.default_branch/);
 });
 
 test('self.yml calls release.yml on push with the kit ref of the branch under test', { skip }, () => {

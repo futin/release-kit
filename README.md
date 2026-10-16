@@ -9,7 +9,7 @@ Shared CI and release parts for futin's Node apps: a reusable PR gate (`ci-node.
 | `.github/workflows/ci-node.yml` | reusable workflow: jobs `checks`, `pr-title`, `skills` |
 | `.github/workflows/release.yml` | reusable workflow: job `release` tags and publishes every unreleased `feat\|fix\|perf` PR on `main` |
 | `.github/workflows/self.yml` | this repo's own CI and releases, through `ci-node.yml` and `release.yml` |
-| `scripts/pr-title.mjs` | the title rule; reads `PR_TITLE` from the environment, exit 1 with the reason on a bad title |
+| `scripts/pr-title.mjs` | the CLI wrapper for the title rule (which lives in `src/conventional.ts`); reads `PR_TITLE` from the environment, exit 1 with the reason on a bad title |
 | `rulesets/main.json` | the `main-pr-only` ruleset |
 | `scripts/apply-repo-settings.sh` | squash-only merge settings + create-or-update the ruleset; `--dry-run` prints the `gh` calls |
 | `src/release-cli.ts` | the `gh` adapter `release.yml` runs (`dist/esm/release-cli.js`): reads `TARGET_SHA`, `GITHUB_REPOSITORY`, `GH_TOKEN` from the environment |
@@ -136,7 +136,8 @@ with no PR is skipped with the warning `no PR for <sha>` and does not block the 
 `workflow_dispatch` with a `sha` re-runs the release for that commit and every unreleased commit before it; with no `sha` it uses the branch head. It is
 idempotent: a commit that already has its tag and its Release is left alone, and a tag whose Release is missing only gets the Release. This is also how the
 baseline gets its GitHub Release. A dispatch whose commit has a later version tag fails with `a newer release exists: <tag>`, because versions are never
-assigned out of order; on a push run the same condition ends green, since it can only be a re-run of a superseded run.
+assigned out of order; on a push run the same condition ends green, since it can only be a re-run of a superseded run. The `sha` must be a commit on the
+default branch: any other commit fails with `target <sha> is not on origin/<default branch>`, with nothing tagged.
 
 ### Reading releases from a server
 
@@ -157,18 +158,15 @@ JSON to a file for a build step, for an install that has no `.git`.
 
 ## Moving `v1`
 
-Apps pin `@v1`, a lightweight tag that floats. Release a compatible change as `vX.Y.Z` and move `v1` to it:
+Apps pin `@v1`, a lightweight tag that floats. The `vX.Y.Z` tags are cut by the `release` job (`self.yml`) when a `feat|fix|perf` PR merges, so do not tag
+them by hand. Only moving `v1` stays manual: once the run is green, point `v1` at the new version:
 
 ```bash
-git tag -a v1.1.0 -m "<what changed>"
+git fetch --tags && git tag -f v1 vX.Y.Z
 ```
 
 ```bash
-git tag -f v1 v1.1.0
-```
-
-```bash
-git push origin v1.1.0 && git push -f origin v1
+git push -f origin v1
 ```
 
 A breaking change to the inputs or the job names gets `v2`; never move `v1` across one.
