@@ -91,7 +91,9 @@ test('skills handles push before it reads a PR base sha', { skip }, () => {
 test('self.yml calls ci-node.yml from a job whose id is ci', { skip }, () => {
   const { jobs } = load('self.yml');
   assert.equal(jobs.ci.uses, './.github/workflows/ci-node.yml');
-  assert.match(jobs.ci.with['check-commands'], /node --test 'test\/\*\*\/\*\.test\.mjs'/);
+  const commands = jobs.ci.with['check-commands'];
+  assert.ok(commands.includes('npm run typecheck'), 'typecheck missing from check-commands');
+  assert.ok(commands.indexOf('npm run typecheck') < commands.indexOf('npm test'), 'npm test must come after npm run typecheck');
 });
 
 test('every setup-node step turns off its package-manager cache (it runs before corepack puts pnpm on PATH)', { skip }, () => {

@@ -19,5 +19,7 @@ jobs:
   ci:
     uses: ./.github/workflows/ci-node.yml
     with:
-      check-commands: node --test 'test/**/*.test.mjs'
+      check-commands: |
+        npm run typecheck
+        npm test
       kit-ref: ${{ github.head_ref || github.ref_name }}
