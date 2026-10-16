@@ -22,11 +22,14 @@ export type Outcome = {
 };
 /**
  * Release every first-parent commit from the newest baseline tag reachable from `target` (inclusive) up to `target`, oldest first. Resolves to one outcome
- * per commit; rejects with `a newer release exists: <tag>` when a later commit already carries a version tag.
+ * per commit. When a later commit already carries a version tag, `onNewer` decides: 'reject' fails with `a newer release exists: <tag>` (a manual dispatch,
+ * where the operator should hear it), 'skip' resolves to `[]` after an info line (a re-run of a superseded push run, which must end green). Either way
+ * nothing is tagged, because a re-run could otherwise tag a commit that was skipped as no-pr out of order.
  */
 export declare function runRelease(o: {
     cwd: string;
     target: string;
     github: GitHubPort;
     log: Log;
+    onNewer: 'reject' | 'skip';
 }): Promise<Outcome[]>;

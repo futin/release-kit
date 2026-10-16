@@ -48,10 +48,11 @@ async function isAncestor(cwd: string, ancestor: string, descendant: string): Pr
 
 // Versions are never assigned out of order: a tag on a strict descendant of the target means a later commit was already released. A tag on an unrelated
 // branch is not a descendant, so it never trips this.
-async function assertNoNewerRelease(cwd: string, target: string): Promise<void> {
+async function newerRelease(cwd: string, target: string): Promise<string | null> {
   for (const t of await versionTags(cwd)) {
-    if (t.commit !== target && (await isAncestor(cwd, target, t.commit))) throw new Error(`a newer release exists: ${t.name}`);
+    if (t.commit !== target && (await isAncestor(cwd, target, t.commit))) return t.name;
   }
+  return null;
 }
 
 // The call can list several PRs; only the one merged as this very commit is its PR. The subject's `(#N)` is the fallback when the API lists none.
@@ -121,12 +122,19 @@ async function releaseCommit(cwd: string, github: GitHubPort, log: Log, sha: str
 
 /**
  * Release every first-parent commit from the newest baseline tag reachable from `target` (inclusive) up to `target`, oldest first. Resolves to one outcome
- * per commit; rejects with `a newer release exists: <tag>` when a later commit already carries a version tag.
+ * per commit. When a later commit already carries a version tag, `onNewer` decides: 'reject' fails with `a newer release exists: <tag>` (a manual dispatch,
+ * where the operator should hear it), 'skip' resolves to `[]` after an info line (a re-run of a superseded push run, which must end green). Either way
+ * nothing is tagged, because a re-run could otherwise tag a commit that was skipped as no-pr out of order.
  */
-export async function runRelease(o: { cwd: string; target: string; github: GitHubPort; log: Log }): Promise<Outcome[]> {
+export async function runRelease(o: { cwd: string; target: string; github: GitHubPort; log: Log; onNewer: 'reject' | 'skip' }): Promise<Outcome[]> {
   const { cwd, github, log } = o;
   const target = await git(cwd, ['rev-parse', `${o.target}^{commit}`]);
-  await assertNoNewerRelease(cwd, target);
+  const newer = await newerRelease(cwd, target);
+  if (newer) {
+    if (o.onNewer === 'reject') throw new Error(`a newer release exists: ${newer}`);
+    log.info(`a newer release exists: ${newer} — nothing to do`);
+    return [];
+  }
 
   const base = await describeBase(cwd, target);
   if (!base) {
