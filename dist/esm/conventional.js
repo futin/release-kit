@@ -22,7 +22,7 @@ export function checkTitle(title) {
 function described(description) {
     return description.trim() === '' ? { ok: false, breaking: false, reason: 'the description after ": " is empty' } : null;
 }
-const RELEASE_TYPES = ['feat', 'fix', 'perf'];
+export const RELEASE_TYPES = ['feat', 'fix', 'perf'];
 // PR bodies edited in the GitHub web UI arrive with CRLF; every parser below works on LF only.
 const lf = (s) => s.replace(/\r\n/g, '\n');
 /** True for a `!` title or a body line starting `BREAKING CHANGE: `. */

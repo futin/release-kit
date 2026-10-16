@@ -8,6 +8,7 @@ export type TitleCheck = {
 /** Parse a PR title against the release-kit title rule. */
 export declare function checkTitle(title: string): TitleCheck;
 export type ReleaseType = 'feat' | 'fix' | 'perf';
+export declare const RELEASE_TYPES: readonly string[];
 /** True for a `!` title or a body line starting `BREAKING CHANGE: `. */
 export declare function isBreaking(check: TitleCheck, body: string | null): boolean;
 /** Parse `1.2.3` or `v1.2.3`; anything else (a prerelease suffix, a short version) is null. */

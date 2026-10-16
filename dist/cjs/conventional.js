@@ -2,6 +2,7 @@
 // The PR-title rule every app's `pr-title` check enforces, and the parse the release workflow reads the bump from. `!` is allowed only on a type that
 // cuts a release: a breaking `chore!` would be a release type no reader or badge can show (spec §Phase C, step 3).
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.RELEASE_TYPES = void 0;
 exports.checkTitle = checkTitle;
 exports.isBreaking = isBreaking;
 exports.parseVersion = parseVersion;
@@ -31,7 +32,7 @@ function checkTitle(title) {
 function described(description) {
     return description.trim() === '' ? { ok: false, breaking: false, reason: 'the description after ": " is empty' } : null;
 }
-const RELEASE_TYPES = ['feat', 'fix', 'perf'];
+exports.RELEASE_TYPES = ['feat', 'fix', 'perf'];
 // PR bodies edited in the GitHub web UI arrive with CRLF; every parser below works on LF only.
 const lf = (s) => s.replace(/\r\n/g, '\n');
 /** True for a `!` title or a body line starting `BREAKING CHANGE: `. */
@@ -95,7 +96,7 @@ function parseTagMessage(msg) {
             trailers.set(m[1], m[2]);
     }
     const type = trailers.get('Release-Type');
-    if (last.length === 0 || trailers.size !== last.length || !type || !RELEASE_TYPES.includes(type)) {
+    if (last.length === 0 || trailers.size !== last.length || !type || !exports.RELEASE_TYPES.includes(type)) {
         return { subject, title, type: 'baseline', breaking: false, notes: body.join('\n').trim() };
     }
     const pr = trailers.get('Release-PR');

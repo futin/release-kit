@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.writeReleasesJson = exports.readReleases = exports.parseVersion = exports.parseTagMessage = exports.nextVersion = exports.isBreaking = exports.formatTagMessage = exports.extractWhatsNew = exports.checkTitle = void 0;
+exports.runRelease = exports.writeReleasesJson = exports.readReleases = exports.parseVersion = exports.parseTagMessage = exports.nextVersion = exports.isBreaking = exports.formatTagMessage = exports.extractWhatsNew = exports.checkTitle = void 0;
 var conventional_js_1 = require("./conventional.js");
 Object.defineProperty(exports, "checkTitle", { enumerable: true, get: function () { return conventional_js_1.checkTitle; } });
 Object.defineProperty(exports, "extractWhatsNew", { enumerable: true, get: function () { return conventional_js_1.extractWhatsNew; } });
@@ -12,3 +12,5 @@ Object.defineProperty(exports, "parseVersion", { enumerable: true, get: function
 var read_releases_js_1 = require("./read-releases.js");
 Object.defineProperty(exports, "readReleases", { enumerable: true, get: function () { return read_releases_js_1.readReleases; } });
 Object.defineProperty(exports, "writeReleasesJson", { enumerable: true, get: function () { return read_releases_js_1.writeReleasesJson; } });
+var release_js_1 = require("./release.js");
+Object.defineProperty(exports, "runRelease", { enumerable: true, get: function () { return release_js_1.runRelease; } });

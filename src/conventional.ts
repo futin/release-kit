@@ -29,7 +29,7 @@ function described(description: string): TitleCheck | null {
 
 export type ReleaseType = 'feat' | 'fix' | 'perf';
 
-const RELEASE_TYPES: readonly string[] = ['feat', 'fix', 'perf'];
+export const RELEASE_TYPES: readonly string[] = ['feat', 'fix', 'perf'];
 
 // PR bodies edited in the GitHub web UI arrive with CRLF; every parser below works on LF only.
 const lf = (s: string): string => s.replace(/\r\n/g, '\n');
