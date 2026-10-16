@@ -40,7 +40,7 @@ test('ci-node.yml has exactly the jobs checks, pr-title, skills', { skip }, () =
 });
 
 test('no job sets name: (it would rename the required ci / <job> context)', { skip }, () => {
-  for (const file of ['ci-node.yml', 'self.yml']) {
+  for (const file of ['ci-node.yml', 'release.yml', 'self.yml']) {
     for (const [id, job] of Object.entries(load(file).jobs)) assert.equal(job.name, undefined, `${file} job ${id} sets name`);
   }
 });
@@ -91,7 +91,9 @@ test('skills handles push before it reads a PR base sha', { skip }, () => {
 test('self.yml calls ci-node.yml from a job whose id is ci', { skip }, () => {
   const { jobs } = load('self.yml');
   assert.equal(jobs.ci.uses, './.github/workflows/ci-node.yml');
-  assert.match(jobs.ci.with['check-commands'], /node --test 'test\/\*\*\/\*\.test\.mjs'/);
+  const commands = jobs.ci.with['check-commands'];
+  assert.ok(commands.includes('npm run typecheck'), 'typecheck missing from check-commands');
+  assert.ok(commands.indexOf('npm run typecheck') < commands.indexOf('npm test'), 'npm test must come after npm run typecheck');
 });
 
 test('every setup-node step turns off its package-manager cache (it runs before corepack puts pnpm on PATH)', { skip }, () => {
@@ -100,4 +102,59 @@ test('every setup-node step turns off its package-manager cache (it runs before 
       assert.equal(step.with?.['package-manager-cache'], 'false', `ci-node.yml job ${id}: setup-node would look for the packageManager binary`);
     }
   }
+});
+
+test('release.yml declares exactly the three workflow_call inputs and their defaults', { skip }, () => {
+  const inputs = load('release.yml').on.workflow_call.inputs;
+  assert.deepEqual(Object.keys(inputs).sort(), ['kit-ref', 'node-version', 'sha']);
+  assert.equal(inputs.sha.default, '');
+  assert.equal(inputs['kit-ref'].default, 'v1');
+  assert.equal(inputs['node-version'].default, '22');
+});
+
+test('release.yml has one job, release, with contents: write and pull-requests: read (setting contents alone drops pull-requests to none)', { skip }, () => {
+  const { jobs } = load('release.yml');
+  assert.deepEqual(Object.keys(jobs), ['release']);
+  assert.deepEqual(jobs.release.permissions, { contents: 'write', 'pull-requests': 'read' });
+});
+
+test('release checks the app out with full history and the kit into .release-kit at kit-ref', { skip }, () => {
+  const steps = load('release.yml').jobs.release.steps;
+  const checkouts = steps.filter(s => (s.uses ?? '').startsWith('actions/checkout@'));
+  assert.equal(checkouts.length, 2);
+  assert.equal(checkouts[0].with['fetch-depth'], '0', 'tags and the first-parent range need full history');
+  assert.equal(checkouts[0].with.repository, undefined, 'the first checkout is the app');
+  assert.equal(checkouts[1].with.repository, 'futin/release-kit');
+  assert.equal(checkouts[1].with.path, '.release-kit');
+  assert.match(checkouts[1].with.ref, /inputs\.kit-ref/);
+});
+
+test('release.yml turns off setup-node package-manager-cache and sets the bot tagger identity', { skip }, () => {
+  const steps = load('release.yml').jobs.release.steps;
+  for (const step of steps.filter(s => (s.uses ?? '').startsWith('actions/setup-node@'))) assert.equal(step.with?.['package-manager-cache'], 'false');
+  const identity = runs(load('release.yml').jobs.release).join('\n');
+  assert.ok(identity.includes('github-actions[bot]'));
+  assert.ok(identity.includes('41898282+github-actions[bot]@users.noreply.github.com'));
+});
+
+test('no run: in release.yml interpolates ${{ }} (title, body and notes are never on a shell line)', { skip }, () => {
+  for (const run of runs(load('release.yml').jobs.release)) assert.ok(!run.includes('${{'), `run: interpolates an expression:\n${run}`);
+});
+
+test('the release CLI step gets TARGET_SHA, GH_TOKEN and DEFAULT_BRANCH through env only', { skip }, () => {
+  const step = load('release.yml').jobs.release.steps.find(s => s.run && s.run.includes('release-cli.js'));
+  assert.ok(step, 'no step runs release-cli.js');
+  assert.equal(step.run.trim(), 'node .release-kit/dist/esm/release-cli.js');
+  assert.match(step.env.TARGET_SHA, /inputs\.sha \|\| github\.sha/);
+  assert.match(step.env.GH_TOKEN, /github\.token/);
+  assert.match(step.env.DEFAULT_BRANCH, /github\.event\.repository\.default_branch/);
+});
+
+test('self.yml calls release.yml on push with the kit ref of the branch under test', { skip }, () => {
+  const job = load('self.yml').jobs.release;
+  assert.ok(job, 'no release job');
+  assert.equal(job.uses, './.github/workflows/release.yml');
+  assert.equal(job.if, "github.event_name == 'push'");
+  assert.deepEqual(job.permissions, { contents: 'write', 'pull-requests': 'read' });
+  assert.match(job.with['kit-ref'], /github\.ref_name/);
 });
