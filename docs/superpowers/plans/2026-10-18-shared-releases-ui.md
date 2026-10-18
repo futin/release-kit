@@ -127,7 +127,7 @@ as `BUMP_TOKEN` in release-kit; Phase A merged. **Gate after merge (user):** onc
   - `git pack-refs --all` after the first read → 2 reads.
   - port returning `null` for `describe` (incomplete) → next `read()` re-reads (2 reads over 2 calls).
   - tagless checkout → 1 read over 2 calls (complete empty is memoised, spec D5).
-  - fresh repo with no `packed-refs` → key built (no throw), memoised.
+  - one commit, no tags, no `packed-refs` → key built (no throw), memoised.
   - root function returning `null` → empty shape and the port is never called.
   - root function read per call: switch an env var between calls → second call reads the second repo.
   - linked worktree root → releases of the main checkout; a tag cut in the main checkout moves the key seen from the worktree.
@@ -174,6 +174,7 @@ Promise<{ code: number; stdout: string }>` is the only way it launches `git`, `g
   - dependency absent → `missing`, warning text exactly `futin/x does not depend on ui-kit yet`, no branch, exit 0.
   - open `bump/ui-kit-v0.2.0` PR, outcome `opened` → that PR closed with a comment naming the new PR number; `closed: [n]`.
   - already pinned and an older `bump/ui-kit-v0.2.0` open → closed with a comment saying the consumer is already on `v0.3.0`; no new PR.
+  - outcome `open` (current PR exists) and an older `bump/ui-kit-v0.2.0` open → the older one closed (the unconditional half of spec step 4).
   - open `bump/ui-kit-v0.4.0` (newer than newest, a manual oddity) → left open.
   - `gh` answering 401 → exit 1 with a message naming `BUMP_TOKEN`.
 - [ ] **Step 2: Run** `npm test` — fail. **Step 3: Implement**; the newest-version discovery stays out of this script (Task B5 passes `VERSION`).
@@ -188,9 +189,10 @@ secret `token`.
 
 - [ ] **Step 1: Failing guard tests** (PyYAML-gated like the rest):
   - inputs are exactly those four with `kit-ref` default `v1`; `token` is a required secret.
-  - a `version` job checks the caller out with `fetch-depth: 0` and outputs the newest annotated `vX.Y.Z` as `version` and the full newest-first list as `versions` (ordered as `readReleases` orders them —
+  - a `version` job checks the caller out with `fetch-depth: 0` (and release-kit at `inputs.kit-ref` into `.release-kit`, since it runs kit code) and outputs the newest annotated `vX.Y.Z` as `version` and the full newest-first list as `versions` (ordered as `readReleases` orders them —
     the job runs `node .release-kit/dist/esm/...` or `readReleases` through a one-liner, builder's choice); no version → `::warning::` and the matrix is
     skipped.
+  - `bump-consumers.yml` joins the fixed file lists of the existing "no job sets `name:`" and `setup-node` cache guards.
   - the matrix over `consumers` has `fail-fast: false`; it checks release-kit out at `inputs.kit-ref` into `.release-kit`; `setup-node@v5` has
     `package-manager-cache: false`; `COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'` in env.
   - no `run:` contains `${{ inputs.` or `${{ github.event`; `secrets.token` appears only under `env:` of steps running `git`/`gh`/the script — so the
@@ -292,7 +294,7 @@ string }): { data: ReleasesResponse | null; chip: { label: string; dot: boolean 
 - [ ] **Failing cases:** first answer `mixed`, empty storage → `chip` `{ label: 'v0.3.0', dot: false }` and storage `0.3.0`; storage `0.2.1` then answer
   `mixed` → `dot: true`; `show()` → `open: true` synchronously, one extra fetch fired, `dot: false`, storage `0.3.0`; storage that throws → after the
   seed `dot: false`, no throw, still `false` after a re-render; refetch rejecting → `data` and `chip` unchanged; body `'<html>'` → previous data kept;
-  `noCurrent` → `chip: null`; unmount before the answer → no state update warning; **Review Focus 3:** storage `0.9.0`, answer newest `0.5.0`, `show()`
+  `noCurrent` → `chip: null`; a `fetch` resolving after `unmount()` → no `setData` call (spy); **Review Focus 3:** storage `0.9.0`, answer newest `0.5.0`, `show()`
   → storage still `0.9.0`; **Review Focus 5:** `show()` then the refetch rejects → `open` stays `true`, `data` is the earlier answer.
 - [ ] Run red → implement → green → commit `feat(releases): useReleases and useWhatsNew`.
 
@@ -314,7 +316,7 @@ Modify `src/index.ts` (export everything in spec Part 2 §Public surface); Test 
 **Produces:** `VersionChip(p: { label; dot; onClick(): void; className? })`; `ReleasesPanel(p: { data: ReleasesResponse; renderNotes?: (notes:
 string) => ReactNode })`; `ReleasesDrawer(p: { data; onClose; renderNotes?; closeOnEscape?; narrow?; restoreFocus? })`; `useMediaQuery(query:
 string): boolean` (false where `matchMedia` is missing).
-- [ ] **Failing cases:** chip aria-label exactly `What's new — v0.3.0` / `What's new — v0.3.0, new release`; `.uk-chip-dot` only with `dot`; panel on
+- [ ] **Failing cases:** chip is a `button.uk-chip`; aria-label exactly `What's new — v0.3.0` / `What's new — v0.3.0, new release`; `.uk-chip-dot` only with `dot`; panel on
   `mixed`: entries in input order with `data-testid="release-<version>"`; baseline shows `Versioning starts here · v0.1.0` and `16 Oct 2026`-style date,
   no badge; `0.2.1` shows `Fix` and `Breaking` badges; title shown without its prefix; `PR #N` link only when both `url` and `pr`; head `What's new` and
   `running v0.3.0` (or `+N`); `noCurrent` → no `running`; empty notes → no `.uk-releases-notes`; custom `renderNotes` output replaces the default;
@@ -371,7 +373,7 @@ moved; keep tests of app wiring; delete tests whose subject moved; PR body `## A
   menu. `main.tsx` imports `ui-kit/styles.css`. Tests: `test/releases-ui.test.tsx` keeps the rail/menu cases (chip present, dot, menu closes on tap,
   no chip on `current: null`) rewritten against the new markup; `test/releases-lib.test.ts` deleted. Notes links keep `rel="noopener"` — one case.
 - **E3 CSS + docs.** `shared/theme.css`: a `--uk-*` block per theme mapping onto existing tokens (`--green-ink`/`--green-tint` → feat, amber → fix,
-  magenta → perf, red → breaking, `--scrim`, `--accent` → dot); delete `releases-*`, `ui-drawer-*` rules from `styles.css`;
+  magenta → perf, red → breaking, `--scrim`, `--accent` → dot); delete `releases-*`, `ui-drawer-*`, `.rail-version-dot`/`.rail-version-label` rules from `styles.css`;
   `test/theme-tokens.test.ts` badge-contrast rows read the same pairs (unchanged values). Docs: `CLAUDE.md` releases invariant (no 10 s race, D5 memo),
   `releases.service.ts` header, README §Releases. `## After merge`: `pnpm run docker:sync`.
 
@@ -387,11 +389,15 @@ moved; keep tests of app wiring; delete tests whose subject moved; PR body `## A
   `className="rail-release"` (its existing class). Tests: `test/dialog-escape.test.tsx` keeps its existing "closes the What's new drawer over an open item
   modal" case green under `closeOnEscape={false}` + `useDialogEscape`; `releases-drawer.test.tsx` and `releases-app.test.tsx` keep wiring cases;
   `releases-lib.test.ts` deleted.
-- **F3 CSS + docs.** `--uk-*` mapping in `styles.css` (cyan dot as today); `test/daylight-contrast.test.ts` reads the badge pairs from the mapping;
+- **F3 CSS + docs.** `--uk-*` mapping in `styles.css` (cyan dot as today), delete `ui-drawer-*`, `releases-*` and `.rail-release-dot` rules;
+  `test/daylight-contrast.test.ts` adds rows for the badge pairs from the mapping;
   `docs/subsystems/releases.md` (why-not-`readReleases` section replaced by "the git port"), `.claude/DESIGN.md` §8.7/§8.10, docs-sync stamp sources.
   `## After merge`: the builder states the step that actually refreshes its `node_modules` volume (check whether `docker:sync` does).
 
 ### Phase G — claude-agents-dashboard
+
+This app's look changes by design (spec D16: ✕ moves to the corner, the baseline gains its date, the chip's aria-label changes), so its PR is titled
+`fix(releases): use release-kit's reader and ui-kit's drawer` (spec Part 3's retitle rule), not `refactor`.
 
 - **G1 server.** `server/lib/releases.ts`: a module-level reader from `createReleasesReader({ root: () => rootOverride ?? repoRoot(), git:
   countingPort })` where `countingPort` wraps release-kit's exported `defaultGitPort()` and counts `for-each-ref` launches; `overrideReleasesRoot` recreates
@@ -399,8 +405,9 @@ moved; keep tests of app wiring; delete tests whose subject moved; PR body `## A
 - **G2 client.** Delete `lib/releases.ts`'s moved functions (keep none unless something else imports them — grep), `hooks/useReleases.ts`;
   `ReleasesDrawer.tsx` wrapper calls `useBackClose(onClose)`, renders ui-kit's with `narrow={useNarrow()}`, `renderNotes={(t) => <Markdown text={t} />}`.
   App uses `useWhatsNew({ storageKey: 'dashboard.releases.lastSeen' })`; SideRail renders `VersionChip` with `className="rel-chip"`. Tests:
-  `test/releases-client.test.ts` keeps app-specific cases; add "stored `0.9.0`, newest `0.5.0`, open → storage stays `0.9.0`" (the D17 fix).
-- **G3 CSS + docs.** `--uk-*` mapping in `client/src/styles.css`, delete `rel-*` drawer rules (keep `.rel-chip` placement); re-shoot Playwright visual
+  `test/releases-client.test.ts` keeps app-specific cases; add "stored `0.9.0`, newest `0.5.0`, open → storage stays `0.9.0`" (the D17 fix) —
+  deliberately duplicating ui-kit's D4 case as app-level proof the fix landed; do not delete it as a duplicate.
+- **G3 CSS + docs.** `--uk-*` mapping in `client/src/styles.css`, delete `rel-*` drawer rules and `.rel-dot` (keep `.rel-chip` placement); re-shoot Playwright visual
   baselines for the drawer and chip (`pnpm test:visual --update-snapshots`, review the diff images in the PR); `docs/subsystems/releases.md`.
   `## After merge`: the dashboard's dependency refresh step.
 
