@@ -1,6 +1,10 @@
 export { checkTitle, extractWhatsNew, formatTagMessage, isBreaking, nextVersion, parseTagMessage, parseVersion } from './conventional.js';
 export type { ParsedTag, ReleaseType, TagFields, TitleCheck } from './conventional.js';
-export { readReleases, writeReleasesJson } from './read-releases.js';
-export type { Release, ReleasesResponse } from './read-releases.js';
+export { defaultGitPort } from './git.js';
+export type { GitPort } from './git.js';
+export { readReleases, readReleasesResult, writeReleasesJson } from './read-releases.js';
+export type { ReadOptions, Release, ReleasesResponse, ReleasesResult } from './read-releases.js';
+export { createReleasesReader, findRepoRoot } from './releases-reader.js';
+export type { ReleasesReader, ReleasesReaderOptions } from './releases-reader.js';
 export { runRelease } from './release.js';
 export type { GitHubPort, Log, Outcome, PullRequest } from './release.js';

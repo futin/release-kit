@@ -40,7 +40,7 @@ test('ci-node.yml has exactly the jobs checks, pr-title, skills', { skip }, () =
 });
 
 test('no job sets name: (it would rename the required ci / <job> context)', { skip }, () => {
-  for (const file of ['ci-node.yml', 'release.yml', 'self.yml']) {
+  for (const file of ['ci-node.yml', 'release.yml', 'self.yml', 'bump-consumers.yml']) {
     for (const [id, job] of Object.entries(load(file).jobs)) assert.equal(job.name, undefined, `${file} job ${id} sets name`);
   }
 });
@@ -97,9 +97,11 @@ test('self.yml calls ci-node.yml from a job whose id is ci', { skip }, () => {
 });
 
 test('every setup-node step turns off its package-manager cache (it runs before corepack puts pnpm on PATH)', { skip }, () => {
-  for (const [id, job] of Object.entries(load('ci-node.yml').jobs)) {
-    for (const step of job.steps.filter(s => (s.uses ?? '').startsWith('actions/setup-node@'))) {
-      assert.equal(step.with?.['package-manager-cache'], 'false', `ci-node.yml job ${id}: setup-node would look for the packageManager binary`);
+  for (const file of ['ci-node.yml', 'bump-consumers.yml']) {
+    for (const [id, job] of Object.entries(load(file).jobs)) {
+      for (const step of job.steps.filter(s => (s.uses ?? '').startsWith('actions/setup-node@'))) {
+        assert.equal(step.with?.['package-manager-cache'], 'false', `${file} job ${id}: setup-node would look for the packageManager binary`);
+      }
     }
   }
 });
@@ -157,4 +159,99 @@ test('self.yml calls release.yml on push with the kit ref of the branch under te
   assert.equal(job.if, "github.event_name == 'push'");
   assert.deepEqual(job.permissions, { contents: 'write', 'pull-requests': 'read' });
   assert.match(job.with['kit-ref'], /github\.ref_name/);
+});
+
+const isKitCheckout = s => (s.uses ?? '').startsWith('actions/checkout@') && s.with?.repository === 'futin/release-kit' && s.with?.path === '.release-kit';
+
+test('bump-consumers.yml declares exactly the four workflow_call inputs and the required secret token', { skip }, () => {
+  const call = load('bump-consumers.yml').on.workflow_call;
+  assert.deepEqual(Object.keys(call.inputs).sort(), ['consumers', 'kit-ref', 'package', 'repository']);
+  assert.equal(call.inputs['kit-ref'].default, 'v1');
+  assert.deepEqual(Object.keys(call.secrets), ['token']);
+  assert.equal(call.secrets.token.required, 'true');
+});
+
+test('bump-consumers version job reads the caller with full history and the kit at kit-ref, and outputs version and versions', { skip }, () => {
+  const job = load('bump-consumers.yml').jobs.version;
+  assert.ok(job, 'no version job');
+  const checkouts = job.steps.filter(s => (s.uses ?? '').startsWith('actions/checkout@'));
+  assert.equal(checkouts[0].with?.repository, undefined, 'the first checkout is the caller');
+  assert.equal(checkouts[0].with['fetch-depth'], '0', 'a depth-1 checkout has no tags, so every run would end at "no version"');
+  const kit = job.steps.find(isKitCheckout);
+  assert.ok(kit, 'no release-kit checkout into .release-kit');
+  assert.match(kit.with.ref, /inputs\.kit-ref/);
+  assert.match(job.outputs.version, /steps\.\w+\.outputs\.version/);
+  assert.match(job.outputs.versions, /steps\.\w+\.outputs\.versions/);
+  const script = runs(job).join('\n');
+  assert.ok(script.includes('.release-kit/dist/esm/'), 'the version is not read by the kit code');
+  assert.ok(script.includes('readReleases'), 'the order must be readReleases\' order');
+  assert.ok(script.includes('::warning::'), 'no version must warn');
+});
+
+test('bump-consumers matrix runs per consumer only when there is a version, fail-fast off, from the kit at kit-ref', { skip }, () => {
+  const job = load('bump-consumers.yml').jobs.bump;
+  assert.ok(job, 'no bump job');
+  assert.ok([job.needs].flat().includes('version'));
+  assert.match(job.if, /needs\.version\.outputs\.version != ''/);
+  assert.equal(job.strategy['fail-fast'], 'false');
+  assert.match(job.strategy.matrix.consumer, /consumers/);
+  const kit = job.steps.find(isKitCheckout);
+  assert.ok(kit, 'no release-kit checkout into .release-kit');
+  assert.match(kit.with.ref, /inputs\.kit-ref/);
+  assert.ok(job.steps.some(s => (s.uses ?? '').startsWith('actions/setup-node@v5') && s.with?.['package-manager-cache'] === 'false'));
+  assert.equal(job.env.COREPACK_ENABLE_DOWNLOAD_PROMPT, '0');
+});
+
+test('the bump-consumer.mjs step gets exactly PKG, REPOSITORY, CONSUMER, VERSION, VERSIONS and GH_TOKEN through env', { skip }, () => {
+  const step = load('bump-consumers.yml').jobs.bump.steps.find(s => s.run && s.run.includes('bump-consumer.mjs'));
+  assert.ok(step, 'no step runs bump-consumer.mjs');
+  assert.deepEqual(Object.keys(step.env).sort(), ['CONSUMER', 'GH_TOKEN', 'PKG', 'REPOSITORY', 'VERSION', 'VERSIONS']);
+  assert.match(step.env.PKG, /inputs\.package/);
+  assert.match(step.env.REPOSITORY, /inputs\.repository/);
+  assert.match(step.env.CONSUMER, /matrix\.consumer/);
+  assert.match(step.env.VERSION, /needs\.version\.outputs\.version\b/);
+  assert.match(step.env.VERSIONS, /needs\.version\.outputs\.versions/);
+  assert.match(step.env.GH_TOKEN, /secrets\.token/);
+});
+
+test('no run: in bump-consumers.yml interpolates ${{ }} (inputs, matrix and event text reach the shell through env only)', { skip }, () => {
+  for (const [id, job] of Object.entries(load('bump-consumers.yml').jobs)) {
+    for (const run of runs(job)) assert.ok(!run.includes('${{'), `job ${id} run: interpolates an expression:\n${run}`);
+  }
+});
+
+test('secrets.token appears only under env: of steps that run git, gh or the bump script', { skip }, () => {
+  const wf = load('bump-consumers.yml');
+  const hits = [];
+  const walk = (node, at) => {
+    if (typeof node === 'string') {
+      if (node.includes('secrets.token')) hits.push(at);
+    } else if (node && typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) walk(v, [...at, k]);
+    }
+  };
+  walk(wf.jobs, []);
+  assert.ok(hits.length > 0, 'the token is never used');
+  for (const at of hits) {
+    const [jobId, steps, i, env] = at;
+    assert.ok(steps === 'steps' && env === 'env' && at.length === 5, `secrets.token outside a step env: jobs.${at.join('.')}`);
+    const run = wf.jobs[jobId].steps[i].run ?? '';
+    assert.ok(/\b(gh|git)\s|bump-consumer\.mjs/.test(run), `jobs.${at.join('.')} is on a step that runs neither git, gh nor the script`);
+  }
+  const clone = runs(wf.jobs.bump).find(r => r.includes('gh repo clone'));
+  assert.ok(clone, 'the consumer is not cloned with gh repo clone');
+});
+
+test('self.yml bumps the three apps after release, on push, from the kit ref of the branch under test', { skip }, () => {
+  const job = load('self.yml').jobs.bump;
+  assert.ok(job, 'no bump job');
+  assert.equal(job.needs, 'release');
+  assert.equal(job.if, "github.event_name == 'push'");
+  assert.equal(job.uses, './.github/workflows/bump-consumers.yml');
+  assert.match(job.with['kit-ref'], /^\$\{\{ github\.ref_name \}\}$/);
+  assert.equal(job.with.package, 'release-kit');
+  assert.equal(job.with.repository, 'futin/release-kit');
+  const consumers = job.with.consumers.split('\n').map(l => l.trim()).filter(Boolean);
+  assert.deepEqual(consumers, ['futin/claude-agents-dashboard', 'futin/backlog-manager', 'futin/guide-manager']);
+  assert.match(job.secrets.token, /^\$\{\{ secrets\.BUMP_TOKEN \}\}$/);
 });
