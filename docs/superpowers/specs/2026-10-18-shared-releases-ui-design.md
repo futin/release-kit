@@ -62,10 +62,10 @@ Node-only CI kit does not. (Recorded so nobody "simplifies" it back later.)
 | --- | -------- | -------- |
 | D1  | **Two packages:** release-kit (server + CI), ui-kit (React). See "Where the code lives". | `release-kit/react` subpath; a monorepo |
 | D2  | **`readReleases` gets bounded and observable**, signature kept: `readReleases(root, opts?)` with `opts.timeoutMs` (default 10 000, applied as `execFile`'s `timeout`, so a hung git is *killed*, not abandoned) and `opts.git` (a port, D3). New `readReleasesResult(root, opts?)` answers `{ value, complete }` — `complete` false when a read that decides the answer failed. `readReleases` is `readReleasesResult(...).value`. Still never rejects. | Racing a timer (guide-manager's approach: the child keeps running) |
-| D3  | **The git port** `opts.git: (args: string[], o: { cwd: string; maxBuffer?: number }) => Promise<string \| null>` — stdout, or `null` for every failure. It is exactly `runGit`'s shape, so backlog-manager passes `runGit` and deletes its 168-line copy and its parity test. The default port is release-kit's own `git()` with the timeout, mapping rejection to `null`, and honouring `o.maxBuffer` instead of its own 256 MiB constant. Output may or may not be trimmed by the port; the reader must behave identically either way. The reader passes an explicit `maxBuffer` (32 MiB, backlog-manager's figure) on the `for-each-ref` read, because `runGit`'s default is `execFile`'s 1 MiB. **The port is the reader's only**: the release engine (`src/release.ts`) keeps calling `git()` directly, still throwing on failure and still unbounded, because a `null` there would make a failed read look like "no tags" and a 10 s kill on `git push` would be a new failure mode in the release workflow. | A timeout option alone (backlog's rule names `runGit`, and its timeout test seam `__setGitTimeoutMs` works through it) |
+| D3  | **The git port** `opts.git: (args: string[], o: { cwd: string; maxBuffer?: number }) => Promise<string \| null>` — stdout, or `null` for every failure. It is exactly `runGit`'s shape, so backlog-manager passes `runGit`, replaces its 168-line service's reads with the shared reader (the thin Nest mount stays) and deletes its parity test. The default port is release-kit's own `git()` with the timeout, mapping rejection to `null`, and honouring `o.maxBuffer` instead of its own 256 MiB constant. Output may or may not be trimmed by the port; the reader must behave identically either way. The reader passes an explicit `maxBuffer` (32 MiB, backlog-manager's figure) on the `for-each-ref` read, because `runGit`'s default is `execFile`'s 1 MiB. **The port is the reader's only**: the release engine (`src/release.ts`) keeps calling `git()` directly, still throwing on failure and still unbounded, because a `null` there would make a failed read look like "no tags" and a 10 s kill on `git push` would be a new failure mode in the release workflow. | A timeout option alone (backlog's rule names `runGit`, and its timeout test seam `__setGitTimeoutMs` works through it) |
 | D4  | **`createReleasesReader(opts)`** in release-kit: `opts.root` is a path or a function returning a path or `null` (read per call, so an env test seam like `GM_RELEASES_ROOT` keeps working); `opts.timeoutMs`, `opts.git` pass through. Answers `{ read(): Promise<ReleasesResponse> }`. Memo key: root + HEAD + mtimes of `packed-refs` and `refs/tags` under the **common** git dir, via `rev-parse HEAD --git-common-dir` through the same port. The common dir is resolved against `root` (git prints it relative to cwd in a main checkout); a path that does not exist (a fresh repo has no `packed-refs`) contributes `0`, as all three copies do; stats are async so the reader never blocks the event loop. A key git cannot produce is never memoised; only a `complete` answer is memoised; concurrent calls under one key share one read; an in-flight read is dropped only if still the current one. Also exported: `findRepoRoot(from)`. No HTTP code — each app mounts `read()` in its own framework in a few lines. | A Node `http` handler (two apps are Nest, the dashboard is raw `http`; the handler is the part that differs) |
 | D5  | **`complete` semantics** (backlog-manager's, now everyone's): `for-each-ref` failing → empty shape, incomplete. No version tags → empty shape, **complete** (so a tagless checkout is memoised — this fixes guide-manager's re-read per request). `describe` failing or finding no reachable tag while releases exist → `current: null`, releases kept, incomplete. `remote get-url` failing or a non-GitHub origin → no `url`, still complete. | guide-manager's "memoise only non-empty" (it could not tell failure from no tags) |
-| D6  | **Types resolve under `moduleResolution: "node"`** via `typesVersions` in both packages' `package.json`, so guide-manager and backlog-manager delete their `declare module 'release-kit'` shims. If `typesVersions` proves insufficient under `nest build`, the shim stays and this is noted in the migration PR — not a blocker. | Keeping the shims as the plan |
+| D6  | **Types resolve under `moduleResolution: "node"`** via a top-level `"types": "./dist/esm/index.d.ts"` (and `"main": "./dist/cjs/index.js"`) in both packages' `package.json` — node10 reads those for a bare import, and `exports`-aware resolvers ignore them — so guide-manager and backlog-manager can delete their `declare module 'release-kit'` shims in their migration PRs. **Not `typesVersions`:** a catch-all mapping would also rewrite the shims' own deep import `release-kit/dist/esm/index` (`guide-manager/server/src/releases/release-kit.d.ts`) to a path that does not exist, with no fallback, turning the `v1.2.0` bump PR red in both Nest apps before their migration lands (measured by review 2 with tsc 5.9.3). A Part 1 test asserts that, under `moduleResolution: node`, both the bare `release-kit` import and the deep `release-kit/dist/esm/index` import resolve to declarations exporting `readReleases`. | `typesVersions`; keeping the shims as the plan |
 | D7  | **ui-kit ships ESM + CJS + `.d.ts`, committed `dist/`**, release-kit's pattern (`scripts/build.mjs`, a dist-drift test). CJS because guide-manager and backlog-manager test with Jest (ts-jest, CommonJS), which cannot load an ESM-only package from `node_modules` without per-app transform config. Components **never import CSS**; the host imports `ui-kit/styles.css` once from its client entry, so Jest never sees a `.css` import. `react` (`^18.3 \|\| ^19`) is a peer dependency; no `react-dom` peer (no portals). npm, not pnpm, like release-kit **(author's call)**. | ESM only; CSS imported by components |
 | D8  | **Bump PRs come from a reusable workflow in release-kit**, `.github/workflows/bump-consumers.yml`, called by a `bump` job in each shared package's own CI after its `release` job. Details in Part 3. | A tag-triggered workflow — tags pushed with `GITHUB_TOKEN` trigger no workflows, and the release job pushes with it |
 | D9  | **Not Renovate or Dependabot.** Neither documents updating `github:owner/repo#vX.Y.Z` dependencies together with a pnpm 12 lockfile (searched 2026-10-18; nothing authoritative either way), and both are an extra app to install and configure in every repo. Revisit if either documents it. | Renovate (`github-tags` datasource), Dependabot |
@@ -99,7 +99,7 @@ That title cuts `v1.2.0`. After it is green, the user moves `v1` (README §Movin
 - `readReleases(root, opts?)`, `readReleasesResult(root, opts?)` (D2, D5), `createReleasesReader(opts)` and `findRepoRoot(from)` (D4).
 - `writeReleasesJson` keeps working, bounded by the default timeout.
 - Exported types gain `ReadOptions`, `GitPort`, `ReleasesReader`.
-- `package.json` gains `typesVersions` (D6).
+- `package.json` gains top-level `types` and `main` (D6).
 - README §Reading releases from a server is rewritten around `createReleasesReader`, with the two mounting shapes (Nest controller, raw `http`) as
   one-line sketches, plus the git port for a server with its own bounded launcher.
 
@@ -115,8 +115,9 @@ That title cuts `v1.2.0`. After it is green, the user moves `v1` (README §Movin
     `self.yml` passes `${{ github.ref_name }}` like its other jobs, so Part 1's own merge runs the script it just merged even though `v1` does not
     have it yet; ui-kit passes `v1`, keeping it equal to its `uses:` ref.
 - Secret: `token`.
-- **Version:** the newest annotated `vX.Y.Z` tag in the calling repo, computed the way `readReleases` orders them. No version means the workflow
-  ends green with a warning.
+- **Version:** the newest annotated `vX.Y.Z` tag in the calling repo, computed the way `readReleases` orders them. The calling repo is checked out with
+  `fetch-depth: 0`, as `release.yml` does, because the default depth-1 checkout has no tags and every run would end at "no version" in silence; a YAML
+  guard test pins it. No version means the workflow ends green with a warning.
 - **One matrix job per consumer**, `fail-fast: false`:
   1. Check out the consumer's default branch with the token.
   2. Find the dependency in `dependencies` or `devDependencies`.
@@ -131,10 +132,12 @@ That title cuts `v1.2.0`. After it is green, the user moves `v1` (README §Movin
   3. Otherwise, update it:
      1. Set the spec to `github:<repository>#<version>`.
      2. Update the lockfile with the consumer's own package manager: `corepack enable`, then `pnpm install --lockfile-only` for `pnpm-lock.yaml` or
-        `npm install --package-lock-only` for `package-lock.json`.
+        `npm install --package-lock-only` for `package-lock.json`, with `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` so corepack never waits on a prompt.
      3. Commit as `github-actions[bot]` and force-push the branch.
      4. Open the PR with D10's title. Its body links the package's GitHub Release for each version skipped over and says how to retitle.
-  4. Close older open `bump/<package>-*` PRs in that consumer as superseded, with a comment naming the new PR **(author's call)**.
+  4. **On every path through steps 2–3**, the early "done" exits included, close every open `bump/<package>-*` PR whose version is below the newest,
+     as superseded, with a comment naming the current one (or saying the consumer is already on it) **(author's call)**. Unconditional, so a run
+     cancelled between opening the new PR and this step is repaired by the next one.
 - **Idempotent:** a re-run, or a run on a push that released nothing, only opens what is missing. So the caller's `bump` job runs on every push to `main`
   after `release`, and needs no "did this run release?" output from the release CLI. There is no `workflow_dispatch` path (in `self.yml` `release` is
   push-only, so a `needs: release` job would be skipped on a dispatch). A missed run is recovered by "Re-run jobs" on that push's run, or by the next push.
@@ -158,13 +161,14 @@ That title cuts `v1.2.0`. After it is green, the user moves `v1` (README §Movin
 2. Land the scaffold PR. It contains `ci.yml` through `ci-node.yml@v1`, `release.yml` through `release.yml@v1`, a PR template with `## What's new`, a
    README, the build and the tests.
 3. Apply `scripts/apply-repo-settings.sh futin/ui-kit` (dry run first) per release-kit's adoption checklist.
-4. Tag the baseline `v0.1.0`, then dispatch the release workflow on it so the baseline gets its GitHub Release (README §Adopting releases, step 3).
-5. Add the `BUMP_TOKEN` secret.
+4. Add the `BUMP_TOKEN` secret — before step 5, because ui-kit's `bump` job lives in its `release.yml` (`needs: release`, which there also runs on
+   `workflow_dispatch`), so the baseline dispatch runs `bump` too and would fail without the token.
+5. Tag the baseline `v0.1.0`, then dispatch the release workflow on it so the baseline gets its GitHub Release (README §Adopting releases, step 3).
 
 The scaffold PR is the first one, so it lands before the ruleset exists — the checklist only requires its contexts to have reported first. The releases UI lands as the second PR,
 `feat(releases): version chip and What's new drawer`, cutting `v0.2.0`.
 
-### Public surface (one export `.`, plus `./styles.css`)
+### Public surface (one export `.`, plus `./styles.css`, which must sit inside `files` — e.g. under `dist/` — or the installed package lacks it)
 
 - **Wire types** — `Release`, `ReleaseType`, `ReleasesResponse`, defined in ui-kit, not imported, because the contract is the JSON on the wire. D19: a
   type-level test asserts release-kit's exported `ReleasesResponse` is assignable to ui-kit's (release-kit is a devDependency only).
@@ -224,9 +228,10 @@ Every PR does the following:
 Per-app specifics:
 
 1. **guide-manager**:
-   - `restoreFocus` is its `restoreTarget` (the ☰ fallback).
    - `narrow` comes from `useMediaQuery('(max-width: 639px)')`.
-   - `renderNotes` stays the escape-first renderer + `sanitizeSnapshot`.
+   - `renderNotes` composes ui-kit's renderer with its own second wall: a `<div>` whose HTML is `sanitizeSnapshot(renderNotesHtml(notes))`, since the
+     lib that held its own renderer is deleted. `sanitizeSnapshot` rewrites links to `rel="noopener"`, so guide-manager's notes links keep today's `rel`.
+   - `restoreFocus` is its `restoreTarget` (the ☰ fallback), moved out of the deleted `ui/Drawer.tsx` into the wrapper.
    - Its 10 s race goes away (the reader is bounded), and so does "only an answer with releases in it is memoised" (D5) — both are stated in its
      `CLAUDE.md` and `releases.service.ts`'s header, which the PR updates.
    - PR body `## After merge`: `pnpm run docker:sync` — the image is unchanged but the lockfile gained ui-kit, and the dependencies live in a named
@@ -241,7 +246,7 @@ Per-app specifics:
    - Updates `docs/subsystems/releases.md` and `.claude/DESIGN.md` §8.7 (the Drawer shell now comes from ui-kit). The `runGit` invariant is unchanged.
 3. **claude-agents-dashboard**:
    - The wrapper calls `useBackClose`.
-   - `narrow` is its `md` breakpoint (`(max-width: 767px)`).
+   - `narrow` is its existing `useNarrow()` (`NARROW_PX = 767.98`, the `md` tier).
    - `renderNotes` is `<Markdown text>`.
    - `overrideReleasesRoot` and `releasesReadCount` survive as a thin layer over `createReleasesReader`, using a counting git port for the read count.
    - Adopts D17's no-lower-write fix.
@@ -257,7 +262,8 @@ identity, so CI needs none.
 All existing `readReleases` cases still pass unchanged. New cases:
 
 - The default port with a fake `git` on `PATH` that sleeps past `timeoutMs` → the child is killed and `for-each-ref` counts as failed: empty shape, incomplete, and the call
-  resolves within roughly `timeoutMs`.
+  resolves within roughly `timeoutMs`. The fake must trap TERM and kill its own `sleep`: `execFile` settles only when the stdio pipes close, and an
+  orphaned `sleep` holds them open (backlog-manager's `test/git-run.test.ts` documents and solves exactly this).
 - A custom port returning `null` for `for-each-ref` → empty shape, incomplete.
 - A port returning `null` for `describe` only → releases kept, `current: null`, incomplete.
 - No reachable tag from HEAD (a branch cut before the baseline) → releases kept, `current: null`, incomplete.
@@ -292,6 +298,7 @@ Covered by the existing YAML guard tests (`test/workflows.test.mjs` pattern):
 The idempotence logic is a small script under `scripts/` (Node, like `pr-title.mjs`), so it gets unit tests with a fake `gh`/`git` runner:
 
 - Already pinned → no PR.
+- Already pinned, an older `bump/ui-kit-v0.2.0` PR still open → that PR closed with a comment, no new PR.
 - An open PR on the branch → no PR.
 - A closed, unmerged PR on the branch (declined) → no PR, no push, exit 0.
 - The branch exists with no PR → force-pushed and a PR opened.
@@ -304,7 +311,8 @@ Proven end to end once by the first real release after the merge.
 
 ### ui-kit, pure logic
 
-Ported from guide-manager's `test/releases-lib.test.ts` case for case.
+Ported from guide-manager's `test/releases-lib.test.ts` case for case, plus the new quote-in-URL case; the https-link case now expects
+`rel="noopener noreferrer"` (D14).
 
 `dotState`:
 
