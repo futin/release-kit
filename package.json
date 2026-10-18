@@ -13,6 +13,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --import tsx --test 'test/**/*.test.mjs' 'test/**/*.test.ts'"
   },
+  "main": "./dist/cjs/index.js",
+  "types": "./dist/esm/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/esm/index.d.ts",
@@ -26,6 +28,7 @@
   "devDependencies": {
     "@types/node": "22.20.5",
     "tsx": "4.23.15",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "typescript-5": "npm:typescript@5.9.3"
   }
 }
