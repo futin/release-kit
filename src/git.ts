@@ -8,12 +8,24 @@ export const VERSION_TAG = /^v\d+\.\d+\.\d+$/;
 // `v1.2.3-rc1`; the exclude is what keeps it out. Every describe in release-kit spreads this constant.
 export const DESCRIBE_FILTER: string[] = ['--match', 'v[0-9]*.[0-9]*.[0-9]*', '--exclude', 'v*[!0-9.]*'];
 
-/** Run git in `cwd`; resolves to trimmed stdout and rejects on a non-zero exit (or a missing git or directory). */
-export function git(cwd: string, args: string[]): Promise<string> {
+/**
+ * Run git in `cwd`; resolves to trimmed stdout and rejects on a non-zero exit (or a missing git or directory). `timeoutMs` kills the child once it runs
+ * that long (the default 0 never does); the release engine passes neither option, so its calls stay unbounded and throwing.
+ */
+export function git(cwd: string, args: string[], o: { timeoutMs?: number; maxBuffer?: number } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     // A tag read on a repo with thousands of long notes is still far below this; it only exists so a runaway output fails instead of truncating.
-    execFile('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }, (err, stdout) => (err ? reject(err) : resolve(stdout.trim())));
+    const maxBuffer = o.maxBuffer ?? 256 * 1024 * 1024;
+    execFile('git', args, { cwd, encoding: 'utf8', maxBuffer, timeout: o.timeoutMs ?? 0 }, (err, stdout) => (err ? reject(err) : resolve(stdout.trim())));
   });
+}
+
+/** How the releases reader runs git: stdout (trimmed or not, the reader copes with both), or `null` for every failure. Never rejects. */
+export type GitPort = (args: string[], o: { cwd: string; maxBuffer?: number }) => Promise<string | null>;
+
+/** {@link git} killed after `timeoutMs`, with the caller's `maxBuffer` when it names one, and any failure mapped to `null`. */
+export function defaultGitPort(timeoutMs = 10_000): GitPort {
+  return (args, o) => git(o.cwd, args, { timeoutMs, maxBuffer: o.maxBuffer }).catch(() => null);
 }
 
 /** Annotated version tags pointing at `sha`. */
@@ -27,16 +39,30 @@ export async function versionTagsAt(cwd: string, sha: string): Promise<string[]>
 
 export type VersionTag = { name: string; commit: string; date: string; message: string };
 
-// NUL cannot occur in a tag message, so it ends every field, the last one included; the newline git prints after each record lands on the next record's first field.
+// NUL cannot occur in a tag message, so it ends every field, the last one included; the newline git prints after each record lands on the next record's
+// first field, and the one after the last record is a short trailing part the field-count loop never reaches.
 const FIELDS = 5;
-const TAG_FORMAT = '--format=%(refname:short)%00%(objecttype)%00%(creatordate:iso-strict)%00%(*objectname)%00%(contents)%00';
+export const TAG_FORMAT = '--format=%(refname:short)%00%(objecttype)%00%(creatordate:iso-strict)%00%(*objectname)%00%(contents)%00';
 
 /**
  * Every annotated `vX.Y.Z` tag with its peeled commit, creation date and full message, newest first. `--sort=-creatordate` has one-second resolution and
  * breaks ties by ascending name, so tags cut in the same second are re-ordered here by version, newest first.
  */
 export async function versionTags(cwd: string): Promise<VersionTag[]> {
-  const out = await git(cwd, ['for-each-ref', '--sort=-creatordate', TAG_FORMAT, 'refs/tags/v*']);
+  return parseVersionTags(await git(cwd, TAG_ARGS));
+}
+
+/** {@link versionTags} through a port, for the releases reader: `null` when the read failed, which is not the same answer as "no tags". */
+export async function versionTagsVia(port: GitPort, cwd: string): Promise<VersionTag[] | null> {
+  const out = await port(TAG_ARGS, { cwd, maxBuffer: TAG_MAX_BUFFER });
+  return out === null ? null : parseVersionTags(out);
+}
+
+const TAG_ARGS = ['for-each-ref', '--sort=-creatordate', TAG_FORMAT, 'refs/tags/v*'];
+// An app's own port may default to execFile's 1 MiB, which a long tag history outgrows; 32 MiB is backlog-manager's figure.
+const TAG_MAX_BUFFER = 32 * 1024 * 1024;
+
+function parseVersionTags(out: string): VersionTag[] {
   const parts = out.split('\0');
   const tags: VersionTag[] = [];
   // %(contents) has newlines of its own, so records are cut on field count, not on lines.
