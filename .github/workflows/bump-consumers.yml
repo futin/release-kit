@@ -1,0 +1,126 @@
+# Reusable bump workflow: after a release, opens one `chore(deps): bump <package> to vX.Y.Z` PR per consumer that is behind (README §Bump PRs; spec D8,
+# D10–D12). Idempotent, so the caller's `bump` job runs on every push to main after `release`: a re-run, or a push that released nothing, only opens what
+# is missing, and a missed run is recovered by "Re-run jobs". Two rules hold it together, the same two as release.yml:
+#   - no input, version or event text appears inside `run:` through `${{ }}` — it reaches the shell and the script through env only;
+#   - the `token` secret (BUMP_TOKEN, a fine-grained PAT) is set only in the env of the steps that run `gh`, `git` or the bump script, so the consumer is
+#     cloned with `gh repo clone` rather than by actions/checkout `with: token:`.
+name: bump-consumers
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: The dependency name in the consumers' package.json, e.g. release-kit.
+        type: string
+        required: true
+      repository:
+        description: The package's own repository, owner/name; consumers pin github:<repository>#vX.Y.Z.
+        type: string
+        required: true
+      consumers:
+        description: Newline-separated owner/name of every repository to bump.
+        type: string
+        required: true
+      kit-ref:
+        description: The release-kit ref the reader and the bump script are taken from; keep it equal to the caller's uses ref.
+        type: string
+        default: v1
+    secrets:
+      token:
+        description: A PAT scoped to the consumers (Contents, Pull requests and Issues read/write); a PR opened with GITHUB_TOKEN starts no CI.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.newest.outputs.version }}
+      versions: ${{ steps.newest.outputs.versions }}
+      consumers: ${{ steps.newest.outputs.consumers }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # A depth-1 checkout has no tags, and every run would end at "no version" in silence.
+          fetch-depth: 0
+      - uses: actions/checkout@v5
+        with:
+          repository: futin/release-kit
+          ref: ${{ inputs.kit-ref }}
+          path: .release-kit
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Newest version
+        id: newest
+        env:
+          CONSUMERS: ${{ inputs.consumers }}
+        # The versions are newest first, in readReleases' order; the bump PR body links every one between a consumer's pin and the newest.
+        run: |
+          node --input-type=module <<'EOF'
+          import { appendFileSync } from 'node:fs';
+          import { readReleasesResult } from './.release-kit/dist/esm/index.js';
+
+          const { value, complete } = await readReleasesResult(process.cwd());
+          if (!complete && value.releases.length === 0) {
+            console.error('could not read the version tags of this repository');
+            process.exit(1);
+          }
+          const versions = value.releases.map((r) => `v${r.version}`);
+          const consumers = (process.env.CONSUMERS ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+          if (versions.length === 0) console.log('::warning::no annotated vX.Y.Z tag in this repository — nothing to bump');
+          else console.log(`newest ${versions[0]}; bumping ${consumers.join(', ') || 'no consumers'}`);
+          appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `version=${versions[0] ?? ''}\nversions=${versions.join(' ')}\nconsumers=${JSON.stringify(consumers)}\n`,
+          );
+          EOF
+
+  bump:
+    needs: version
+    if: needs.version.outputs.version != '' && needs.version.outputs.consumers != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      # One consumer's failure (an expired token scope, a broken lockfile) must not cancel the others' bumps.
+      fail-fast: false
+      matrix:
+        consumer: ${{ fromJSON(needs.version.outputs.consumers) }}
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: futin/release-kit
+          ref: ${{ inputs.kit-ref }}
+          path: .release-kit
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          # v5 defaults this on, and it then looks for the packageManager binary (pnpm) before corepack has installed it.
+          package-manager-cache: false
+      - name: Clone the consumer
+        env:
+          CONSUMER: ${{ matrix.consumer }}
+          GH_TOKEN: ${{ secrets.token }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::the token secret is empty; add the BUMP_TOKEN secret and re-run the job"
+            exit 1
+          fi
+          gh repo clone "$CONSUMER" consumer || {
+            echo "::error::could not clone $CONSUMER; the BUMP_TOKEN secret is missing, expired or not scoped to it — renew it and re-run the job"
+            exit 1
+          }
+      - name: Bump
+        working-directory: consumer
+        env:
+          PKG: ${{ inputs.package }}
+          REPOSITORY: ${{ inputs.repository }}
+          CONSUMER: ${{ matrix.consumer }}
+          VERSION: ${{ needs.version.outputs.version }}
+          VERSIONS: ${{ needs.version.outputs.versions }}
+          GH_TOKEN: ${{ secrets.token }}
+        run: node ../.release-kit/scripts/bump-consumer.mjs
