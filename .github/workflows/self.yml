@@ -35,8 +35,8 @@ jobs:
     with:
       kit-ref: ${{ github.ref_name }}
 
-  # After every push's release, one bump PR per app that is behind the newest kit tag (README §Bump PRs). Idempotent, so it runs on every push and needs no
-  # "did this run release?" signal; it is skipped with release on a pull_request. futin/ui-kit joins the list once that repo exists and BUMP_TOKEN covers it.
+  # After every push's release, one bump PR per consumer that is behind the newest kit tag (README §Bump PRs). Idempotent, so it runs on every push and needs
+  # no "did this run release?" signal; it is skipped with release on a pull_request.
   bump:
     needs: release
     if: github.event_name == 'push'
@@ -48,6 +48,7 @@ jobs:
         futin/claude-agents-dashboard
         futin/backlog-manager
         futin/guide-manager
+        futin/ui-kit
       kit-ref: ${{ github.ref_name }}
     secrets:
       token: ${{ secrets.BUMP_TOKEN }}

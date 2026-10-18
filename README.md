@@ -196,8 +196,7 @@ is closed with a comment naming the newer one. No tag at all ends green with a w
 - **Retitling:** `chore` cuts no release of the app. When the bump changes something the app's users see, retitle it `fix(deps): …` or `feat(deps): …` and
   add a `## What's new` section before merging.
 - **After merge:** the lockfile changed, so refresh the app's dev-stack `node_modules` the way its README says.
-- **Consumers:** `futin/claude-agents-dashboard`, `futin/backlog-manager` and `futin/guide-manager`, listed in the `bump` job of `self.yml`. `futin/ui-kit`
-  joins with a one-line change once that repo exists and the token covers it.
+- **Consumers:** `futin/claude-agents-dashboard`, `futin/backlog-manager`, `futin/guide-manager` and `futin/ui-kit`, listed in the `bump` job of `self.yml`.
 - **`BUMP_TOKEN`:** a fine-grained PAT stored as a secret of this repo, scoped to the consumer repos only, with Contents, Pull requests and Issues read/write
   (the superseded-PR comment goes through the issue-comments API). It needs no Workflows permission, because a bump touches only `package.json` and the
   lockfile. It is a PAT and not `GITHUB_TOKEN` because a PR opened with `GITHUB_TOKEN` starts no CI. When it is missing, expired or not scoped to a consumer,
