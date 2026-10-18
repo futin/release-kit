@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runRelease = exports.writeReleasesJson = exports.readReleases = exports.parseVersion = exports.parseTagMessage = exports.nextVersion = exports.isBreaking = exports.formatTagMessage = exports.extractWhatsNew = exports.checkTitle = void 0;
+exports.runRelease = exports.writeReleasesJson = exports.readReleasesResult = exports.readReleases = exports.defaultGitPort = exports.parseVersion = exports.parseTagMessage = exports.nextVersion = exports.isBreaking = exports.formatTagMessage = exports.extractWhatsNew = exports.checkTitle = void 0;
 var conventional_js_1 = require("./conventional.js");
 Object.defineProperty(exports, "checkTitle", { enumerable: true, get: function () { return conventional_js_1.checkTitle; } });
 Object.defineProperty(exports, "extractWhatsNew", { enumerable: true, get: function () { return conventional_js_1.extractWhatsNew; } });
@@ -9,8 +9,11 @@ Object.defineProperty(exports, "isBreaking", { enumerable: true, get: function (
 Object.defineProperty(exports, "nextVersion", { enumerable: true, get: function () { return conventional_js_1.nextVersion; } });
 Object.defineProperty(exports, "parseTagMessage", { enumerable: true, get: function () { return conventional_js_1.parseTagMessage; } });
 Object.defineProperty(exports, "parseVersion", { enumerable: true, get: function () { return conventional_js_1.parseVersion; } });
+var git_js_1 = require("./git.js");
+Object.defineProperty(exports, "defaultGitPort", { enumerable: true, get: function () { return git_js_1.defaultGitPort; } });
 var read_releases_js_1 = require("./read-releases.js");
 Object.defineProperty(exports, "readReleases", { enumerable: true, get: function () { return read_releases_js_1.readReleases; } });
+Object.defineProperty(exports, "readReleasesResult", { enumerable: true, get: function () { return read_releases_js_1.readReleasesResult; } });
 Object.defineProperty(exports, "writeReleasesJson", { enumerable: true, get: function () { return read_releases_js_1.writeReleasesJson; } });
 var release_js_1 = require("./release.js");
 Object.defineProperty(exports, "runRelease", { enumerable: true, get: function () { return release_js_1.runRelease; } });

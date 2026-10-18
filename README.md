@@ -156,6 +156,16 @@ const { current, releases } = await readReleases(repoRoot); // { version, ahead 
 `readReleases` reads the local annotated version tags, so the checkout needs its tags. `dist/esm/releases-json.js <outFile> [repoRoot]` writes the same
 JSON to a file for a build step, for an install that has no `.git`.
 
+Every git read is killed after `timeoutMs` (default `10_000`). An app with its own git runner passes it as `git`, a `GitPort` that answers stdout or `null`
+for any failure; that port carries its own bound. `readReleasesResult` answers `{ value, complete }`: `complete` is false when the tag read failed, or when
+releases exist but no tag is reachable from `HEAD`, so a memoiser can skip caching that answer:
+
+```ts
+import { defaultGitPort, readReleasesResult } from 'release-kit';
+
+const { value, complete } = await readReleasesResult(repoRoot, { timeoutMs: 5_000 }); // or { git: myPort }, e.g. a wrapper around defaultGitPort()
+```
+
 ## Moving `v1`
 
 Apps pin `@v1`, a lightweight tag that floats. The `vX.Y.Z` tags are cut by the `release` job (`self.yml`) when a `feat|fix|perf` PR merges, so do not tag
