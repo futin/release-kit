@@ -192,6 +192,8 @@ secret `token`.
   - a `version` job checks the caller out with `fetch-depth: 0` (and release-kit at `inputs.kit-ref` into `.release-kit`, since it runs kit code) and outputs the newest annotated `vX.Y.Z` as `version` and the full newest-first list as `versions` (ordered as `readReleases` orders them —
     the job runs `node .release-kit/dist/esm/...` or `readReleases` through a one-liner, builder's choice); no version → `::warning::` and the matrix is
     skipped.
+  - the step running `bump-consumer.mjs` has exactly the env `PKG`, `REPOSITORY`, `CONSUMER` (from inputs/matrix), `VERSION` and `VERSIONS` (from
+    `needs.version.outputs.version` / `.versions`), `GH_TOKEN` (from `secrets.token`).
   - `bump-consumers.yml` joins the fixed file lists of the existing "no job sets `name:`" and `setup-node` cache guards.
   - the matrix over `consumers` has `fail-fast: false`; it checks release-kit out at `inputs.kit-ref` into `.release-kit`; `setup-node@v5` has
     `package-manager-cache: false`; `COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'` in env.
@@ -294,7 +296,7 @@ string }): { data: ReleasesResponse | null; chip: { label: string; dot: boolean 
 - [ ] **Failing cases:** first answer `mixed`, empty storage → `chip` `{ label: 'v0.3.0', dot: false }` and storage `0.3.0`; storage `0.2.1` then answer
   `mixed` → `dot: true`; `show()` → `open: true` synchronously, one extra fetch fired, `dot: false`, storage `0.3.0`; storage that throws → after the
   seed `dot: false`, no throw, still `false` after a re-render; refetch rejecting → `data` and `chip` unchanged; body `'<html>'` → previous data kept;
-  `noCurrent` → `chip: null`; a `fetch` resolving after `unmount()` → no `setData` call (spy); **Review Focus 3:** storage `0.9.0`, answer newest `0.5.0`, `show()`
+  `noCurrent` → `chip: null`; a `fetch` resolving after `unmount()` → nothing written to storage and `console.error` not called (spy), test exits cleanly; **Review Focus 3:** storage `0.9.0`, answer newest `0.5.0`, `show()`
   → storage still `0.9.0`; **Review Focus 5:** `show()` then the refetch rejects → `open` stays `true`, `data` is the earlier answer.
 - [ ] Run red → implement → green → commit `feat(releases): useReleases and useWhatsNew`.
 
