@@ -8,8 +8,10 @@ Shared CI and release parts for futin's Node apps: a reusable PR gate (`ci-node.
 |---|---|
 | `.github/workflows/ci-node.yml` | reusable workflow: jobs `checks`, `pr-title`, `skills` |
 | `.github/workflows/release.yml` | reusable workflow: job `release` tags and publishes every unreleased `feat\|fix\|perf` PR on `main` |
-| `.github/workflows/self.yml` | this repo's own CI and releases, through `ci-node.yml` and `release.yml` |
+| `.github/workflows/bump-consumers.yml` | reusable workflow: jobs `version` and `bump` open one bump PR per consumer that is behind the newest tag (§Bump PRs) |
+| `.github/workflows/self.yml` | this repo's own CI, releases and bump PRs, through `ci-node.yml`, `release.yml` and `bump-consumers.yml` |
 | `scripts/pr-title.mjs` | the CLI wrapper for the title rule (which lives in `src/conventional.ts`); reads `PR_TITLE` from the environment, exit 1 with the reason on a bad title |
+| `scripts/bump-consumer.mjs` | the per-consumer bump `bump-consumers.yml` runs: reads `PKG`, `REPOSITORY`, `CONSUMER`, `VERSION`, `VERSIONS`, `GH_TOKEN` from the environment |
 | `rulesets/main.json` | the `main-pr-only` ruleset |
 | `scripts/apply-repo-settings.sh` | squash-only merge settings + create-or-update the ruleset; `--dry-run` prints the `gh` calls |
 | `src/release-cli.ts` | the `gh` adapter `release.yml` runs (`dist/esm/release-cli.js`): reads `TARGET_SHA`, `GITHUB_REPOSITORY`, `GH_TOKEN` from the environment |
@@ -178,6 +180,33 @@ The reader reads the local annotated version tags, so the checkout needs its tag
 a file for a build step, for an install that has no `.git`. Underneath, `readReleases(root, opts?)` answers once without a memo, and
 `readReleasesResult(root, opts?)` answers `{ value, complete }`: `complete` is false when the tag read failed, or when releases exist but no tag is reachable
 from `HEAD`.
+
+## Bump PRs
+
+After every push to `main`, the `bump` job in `self.yml` runs `bump-consumers.yml` once the `release` job is done. It reads the newest annotated `vX.Y.Z` tag
+of this repo and, for each consumer, opens a PR titled `chore(deps): bump release-kit to vX.Y.Z` from branch `bump/release-kit-vX.Y.Z` that pins
+`github:futin/release-kit#vX.Y.Z` in `dependencies` or `devDependencies` and refreshes the consumer's own lockfile. The PR body links each release the bump
+covers. The workflow opens bump PRs and never merges them; the consumer's CI is the gate.
+
+A consumer gets no new PR when it is already on that version, when a PR from that branch is open, or when one was closed, merged or not. A consumer that does
+not depend on the package yet ends green with the warning `<consumer> does not depend on release-kit yet`. On every path, an open bump PR for an older version
+is closed with a comment naming the newer one. No tag at all ends green with a warning and bumps nothing.
+
+- **Declining a version:** close its PR unmerged. That version is never offered again; the next release opens its own PR as usual.
+- **Retitling:** `chore` cuts no release of the app. When the bump changes something the app's users see, retitle it `fix(deps): …` or `feat(deps): …` and
+  add a `## What's new` section before merging.
+- **After merge:** the lockfile changed, so refresh the app's dev-stack `node_modules` the way its README says.
+- **Consumers:** `futin/claude-agents-dashboard`, `futin/backlog-manager` and `futin/guide-manager`, listed in the `bump` job of `self.yml`. `futin/ui-kit`
+  joins with a one-line change once that repo exists and the token covers it.
+- **`BUMP_TOKEN`:** a fine-grained PAT stored as a secret of this repo, scoped to the consumer repos only, with Contents, Pull requests and Issues read/write
+  (the superseded-PR comment goes through the issue-comments API). It needs no Workflows permission, because a bump touches only `package.json` and the
+  lockfile. It is a PAT and not `GITHUB_TOKEN` because a PR opened with `GITHUB_TOKEN` starts no CI. When it is missing, expired or not scoped to a consumer,
+  that consumer's job fails with a message naming `BUMP_TOKEN`; renew it and re-run.
+- **Recovery:** the workflow is idempotent: a re-run only opens what is missing and force-pushes a bump branch left behind by a cancelled run. A missed or
+  failed bump is recovered by "Re-run jobs" on that push's run, or by the next push to `main`. There is no `workflow_dispatch` path.
+
+Another shared package calls the same workflow from its own CI, after its `release` job, with its own `package`, `repository` and `consumers`, `kit-ref: v1`
+equal to its `uses:` ref, and `secrets: token: ${{ secrets.BUMP_TOKEN }}`.
 
 ## Moving `v1`
 
