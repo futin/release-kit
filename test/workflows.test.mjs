@@ -242,7 +242,7 @@ test('secrets.token appears only under env: of steps that run git, gh or the bum
   assert.ok(clone, 'the consumer is not cloned with gh repo clone');
 });
 
-test('self.yml bumps the three apps after release, on push, from the kit ref of the branch under test', { skip }, () => {
+test('self.yml bumps the three apps and ui-kit after release, on push, from the kit ref of the branch under test', { skip }, () => {
   const job = load('self.yml').jobs.bump;
   assert.ok(job, 'no bump job');
   assert.equal(job.needs, 'release');
@@ -252,6 +252,6 @@ test('self.yml bumps the three apps after release, on push, from the kit ref of 
   assert.equal(job.with.package, 'release-kit');
   assert.equal(job.with.repository, 'futin/release-kit');
   const consumers = job.with.consumers.split('\n').map(l => l.trim()).filter(Boolean);
-  assert.deepEqual(consumers, ['futin/claude-agents-dashboard', 'futin/backlog-manager', 'futin/guide-manager']);
+  assert.deepEqual(consumers, ['futin/claude-agents-dashboard', 'futin/backlog-manager', 'futin/guide-manager', 'futin/ui-kit']);
   assert.match(job.secrets.token, /^\$\{\{ secrets\.BUMP_TOKEN \}\}$/);
 });
