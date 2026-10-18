@@ -141,30 +141,43 @@ default branch: any other commit fails with `target <sha> is not on origin/<defa
 
 ### Reading releases from a server
 
-The package's `exports` is the whole surface (esm, cjs and `.d.ts`), so a Node backend depends on a tag and calls the reader against its own checkout:
+The package's `exports` is the whole surface (esm, cjs and `.d.ts`), so a Node backend depends on a tag and builds one reader for its own checkout:
 
 ```bash
-pnpm add github:futin/release-kit#v1.1.0
+pnpm add github:futin/release-kit#v1.2.0
 ```
 
 ```ts
-import { readReleases } from 'release-kit';
+import { createReleasesReader, findRepoRoot } from 'release-kit';
 
-const { current, releases } = await readReleases(repoRoot); // { version, ahead } | null, newest first; never rejects
+const releases = createReleasesReader({ root: findRepoRoot(process.cwd()) ?? process.cwd() });
+const { current, releases: list } = await releases.read(); // { version, ahead } | null, newest first; never rejects
 ```
 
-`readReleases` reads the local annotated version tags, so the checkout needs its tags. `dist/esm/releases-json.js <outFile> [repoRoot]` writes the same
-JSON to a file for a build step, for an install that has no `.git`.
+`read()` is memoised. Its key is the root, `HEAD`, and the mtimes of `packed-refs` and `refs/tags` under the common git dir, so a commit, a new tag or a
+`git pack-refs` re-reads, and a linked worktree sees the main checkout's tags. Only a complete answer is kept (a checkout with no version tags is complete);
+concurrent calls under one key share one read. `root` may be a function, read on every call and answering a path or `null` (the empty shape, no git run),
+so an env seam such as `() => process.env.MY_RELEASES_ROOT ?? findRepoRoot(process.cwd())` keeps working. `findRepoRoot(from)` is the first ancestor holding
+a `.git` entry, directory or file.
 
 Every git read is killed after `timeoutMs` (default `10_000`). An app with its own git runner passes it as `git`, a `GitPort` that answers stdout or `null`
-for any failure; that port carries its own bound. `readReleasesResult` answers `{ value, complete }`: `complete` is false when the tag read failed, or when
-releases exist but no tag is reachable from `HEAD`, so a memoiser can skip caching that answer:
+for any failure; that port carries its own bound and also runs the key's `rev-parse`:
 
 ```ts
-import { defaultGitPort, readReleasesResult } from 'release-kit';
-
-const { value, complete } = await readReleasesResult(repoRoot, { timeoutMs: 5_000 }); // or { git: myPort }, e.g. a wrapper around defaultGitPort()
+const releases = createReleasesReader({ root, git: myPort }); // or { root, timeoutMs: 5_000 }, or a wrapper around defaultGitPort()
 ```
+
+There is no HTTP code in the kit; each app mounts `read()` in its own framework:
+
+```ts
+@Get('releases') releases() { return reader.read(); } // Nest
+if (req.url === '/api/releases') return void reader.read().then((r) => res.end(JSON.stringify(r))); // raw node:http
+```
+
+The reader reads the local annotated version tags, so the checkout needs its tags. `dist/esm/releases-json.js <outFile> [repoRoot]` writes the same JSON to
+a file for a build step, for an install that has no `.git`. Underneath, `readReleases(root, opts?)` answers once without a memo, and
+`readReleasesResult(root, opts?)` answers `{ value, complete }`: `complete` is false when the tag read failed, or when releases exist but no tag is reachable
+from `HEAD`.
 
 ## Moving `v1`
 
