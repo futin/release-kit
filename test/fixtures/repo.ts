@@ -9,6 +9,8 @@ export type TestRepo = {
   commit(subject: string): string;
   tag(name: string, sha: string, message?: string): void;
   setOrigin(url: string): void;
+  /** A linked worktree of this repo at `path`, detached at HEAD; removed by `cleanup`. */
+  worktree(path: string): string;
   cleanup(): void;
 };
 
@@ -41,6 +43,11 @@ export function makeRepo(o: { bareOrigin?: boolean } = {}): TestRepo {
     setOrigin(url) {
       const has = run(dir, ['remote']).split('\n').includes('origin');
       run(dir, ['remote', has ? 'set-url' : 'add', 'origin', url]);
+    },
+    worktree(path) {
+      run(dir, ['worktree', 'add', '-q', '--detach', path]);
+      dirs.push(path);
+      return path;
     },
     cleanup() {
       for (const d of dirs) rmSync(d, { recursive: true, force: true });
