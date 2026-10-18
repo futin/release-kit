@@ -32,6 +32,8 @@ as `spec Dn` / `spec Part n`.
 - `react` peer range `^18.3 || ^19`; no `react-dom` peer.
 - localStorage keys stay: `dashboard.releases.lastSeen`, `backlog-manager.releases-last-seen`, `guide-manager.releases-last-seen`.
 - No `${{ }}` inside any `run:` carries `inputs.*`, PR or event text — env or argv only.
+- In release-kit and ui-kit, every task that touches `src/` runs `npm run build` before `npm test` and commits `dist/` with its change — the
+  dist-drift test fails otherwise. "Run `npm test` — pass" below always means after that build.
 
 ## Review Focus
 
@@ -85,11 +87,12 @@ as `BUMP_TOKEN` in release-kit; Phase A merged. **Gate after merge (user):** onc
 - `type ReadOptions = { timeoutMs?: number; git?: GitPort }`
 - `readReleasesResult(root: string, opts?: ReadOptions): Promise<{ value: ReleasesResponse; complete: boolean }>`
 - `readReleases(root: string, opts?: ReadOptions): Promise<ReleasesResponse>` (= `.value`)
-- `defaultGitPort(timeoutMs: number): GitPort` (internal; exported from `git.ts` only)
+- `defaultGitPort(timeoutMs?: number): GitPort` — exported from `src/index.ts` too, because the dashboard's server may import only the bare
+  `release-kit` specifier (`claude-agents-dashboard/test/server-deps.test.ts`) and Task G1 wraps it
 - `git(cwd, args, o?: { timeoutMs?: number; maxBuffer?: number })` — the release engine keeps calling it without options (unbounded, throwing).
 
 - [ ] **Step 1: Write the failing tests** (all existing cases in the file must keep passing untouched):
-  - recording port: the argv lists a custom port receives equal those the default port would run (four reads: `for-each-ref` with the tag format,
+  - recording port: the argv lists a custom port receives equal those the default port would run (three reads: `for-each-ref` with the tag format,
     `remote get-url origin`, `describe --long` + `DESCRIBE_FILTER`; `for-each-ref` carries `maxBuffer` 33554432).
   - port returning `null` for `for-each-ref` → `{ value: { current: null, releases: [] }, complete: false }`.
   - port returning `null` for `describe` only, on a repo with baseline + one release → releases length 2, `current: null`, `complete: false`.
@@ -136,10 +139,12 @@ as `BUMP_TOKEN` in release-kit; Phase A merged. **Gate after merge (user):** onc
 
 ### Task B3: Types under `moduleResolution: node`
 
-**Files:** Modify `package.json` (top-level `"types": "./dist/esm/index.d.ts"`, `"main": "./dist/cjs/index.js"`); Test `test/types-node10.test.ts`
+**Files:** Modify `package.json` (top-level `"types": "./dist/esm/index.d.ts"`, `"main": "./dist/cjs/index.js"`; devDependency alias
+`"typescript-5": "npm:typescript@5.9.3"` — release-kit's own TypeScript 7 rejects `moduleResolution: node` with TS5108, and 5.9.3 is what the Nest
+apps compile with); Test `test/types-node10.test.ts`
 with a fixture dir `test/fixtures/node10/` (a `tsconfig.json` with `moduleResolution: "node"`, `module: "commonjs"`, and two `.ts` files).
 
-- [ ] **Step 1: Failing test:** the test links the package into a tmp `node_modules/release-kit` and runs `tsc --noEmit -p` on the fixture: file 1
+- [ ] **Step 1: Failing test:** the test links the package into a tmp `node_modules/release-kit` and runs `node_modules/typescript-5/bin/tsc --noEmit -p` on the fixture (never the root `tsc`): file 1
   `import { readReleases, createReleasesReader } from 'release-kit'` typechecks; file 2 `export * from 'release-kit/dist/esm/index'` inside a
   `declare module 'release-kit'` shim (guide-manager's exact shim) typechecks and still exports `readReleases`. Exit 0 = pass.
 - [ ] **Step 2: Run** — fails (no `types`). **Step 3:** add the fields. **Step 4: Run** — pass. **Step 5: Commit** `fix(package): resolve types under
@@ -152,7 +157,7 @@ with a fixture dir `test/fixtures/node10/` (a `tsconfig.json` with `moduleResolu
 **Interfaces — Produces:** `bumpConsumer(o: { pkg, repository, consumer, version, dir, run })` → `{ outcome: 'pinned' | 'open' | 'closed' |
 'missing' | 'opened', pr?: number, closed: number[] }`, where `dir` is the consumer checkout and `run(cmd: string, args: string[], opts?) =>
 Promise<{ code: number; stdout: string }>` is the only way it launches `git`, `gh`, `pnpm`, `npm`. CLI: reads `PKG`, `REPOSITORY`, `CONSUMER`,
-`VERSION`, `GH_TOKEN` from env, `dir` = cwd; exit 0 for every outcome but a failed command; prints a `::warning::` for `missing`.
+`VERSION`, `VERSIONS` (newest-first, space-separated), `GH_TOKEN` from env, `dir` = cwd; exit 0 for every outcome but a failed command; prints a `::warning::` for `missing`.
 
 - [ ] **Step 1: Failing tests** with a fake `run` recording calls and scripted `gh` answers; versions `v0.3.0` newest:
   - dependency already `github:futin/ui-kit#v0.3.0` → `pinned`, no `git push`, no `gh pr create`.
@@ -163,7 +168,8 @@ Promise<{ code: number; stdout: string }>` is the only way it launches `git`, `g
   - behind, nothing exists → `package.json` dependency rewritten (other fields byte-identical, formatting kept), `pnpm install --lockfile-only` run for a
     `pnpm-lock.yaml` consumer, `npm install --package-lock-only` for a `package-lock.json` one, commit by `github-actions[bot]`, force-push,
     `gh pr create` with title exactly `chore(deps): bump ui-kit to v0.3.0`; body contains the retitle hint, an "After merge" line about refreshing
-    `node_modules`, and a link `https://github.com/futin/ui-kit/releases/tag/v0.3.0`.
+    `node_modules`, and, for a consumer pinned at `v0.1.0` with `VERSIONS` `v0.3.0 v0.2.0 v0.1.0`, exactly the two links
+    `https://github.com/futin/ui-kit/releases/tag/v0.3.0` and `.../tag/v0.2.0` (every version above the pin, spec Part 1 step 3.4).
   - dependency under `devDependencies` → updated there.
   - dependency absent → `missing`, warning text exactly `futin/x does not depend on ui-kit yet`, no branch, exit 0.
   - open `bump/ui-kit-v0.2.0` PR, outcome `opened` → that PR closed with a comment naming the new PR number; `closed: [n]`.
@@ -182,12 +188,13 @@ secret `token`.
 
 - [ ] **Step 1: Failing guard tests** (PyYAML-gated like the rest):
   - inputs are exactly those four with `kit-ref` default `v1`; `token` is a required secret.
-  - a `version` job checks the caller out with `fetch-depth: 0` and outputs the newest annotated `vX.Y.Z` (ordered as `readReleases` orders them —
+  - a `version` job checks the caller out with `fetch-depth: 0` and outputs the newest annotated `vX.Y.Z` as `version` and the full newest-first list as `versions` (ordered as `readReleases` orders them —
     the job runs `node .release-kit/dist/esm/...` or `readReleases` through a one-liner, builder's choice); no version → `::warning::` and the matrix is
     skipped.
   - the matrix over `consumers` has `fail-fast: false`; it checks release-kit out at `inputs.kit-ref` into `.release-kit`; `setup-node@v5` has
     `package-manager-cache: false`; `COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'` in env.
-  - no `run:` contains `${{ inputs.` or `${{ github.event`; `secrets.token` appears only under `env:` of steps running `git`/`gh`/the script.
+  - no `run:` contains `${{ inputs.` or `${{ github.event`; `secrets.token` appears only under `env:` of steps running `git`/`gh`/the script — so the
+    consumer is cloned in a `run:` step (`gh repo clone` with `GH_TOKEN` in env), not by `actions/checkout` `with: token:`.
   - `self.yml` has job `bump` with `needs: release`, `if: github.event_name == 'push'`, `uses: ./.github/workflows/bump-consumers.yml`, `kit-ref:
     ${{ github.ref_name }}`, consumers exactly `futin/claude-agents-dashboard`, `futin/backlog-manager`, `futin/guide-manager`, secret from
     `secrets.BUMP_TOKEN`.
@@ -245,8 +252,8 @@ One PR, title `feat(releases): version chip and What's new drawer` (cuts `v0.2.0
 
 **Produces:** `ReleaseType = 'feat' | 'fix' | 'perf' | 'baseline'`; `Release { version; date; title; type; scope?; pr?; breaking; notes; url? }`;
 `ReleasesResponse { current: { version: string; ahead: number } | null; releases: Release[] }`. Fixtures (plain data, named exports):
-`baselineOnly`, `mixed` (baseline `0.1.0`, `feat` `0.2.0` with PR and url, `fix` `0.2.1` breaking, `perf` `0.3.0` with long notes), `noCurrent`
-(`current: null`), `empty` (`{ current: null, releases: [] }`), `hostileNotes` (notes with `<script>`, `<img onerror>`, `javascript:` link, an `&` in a
+`baselineOnly`, `mixed` (newest first, as the route answers: `perf` `0.3.0` with long notes, `fix` `0.2.1` breaking, `feat` `0.2.0` with PR and url, baseline
+`0.1.0`; `current: { version: '0.3.0', ahead: 0 }`), `noCurrent` (`mixed` with `current: null`), `empty` (`{ current: null, releases: [] }`), `hostileNotes` (notes with `<script>`, `<img onerror>`, `javascript:` link, an `&` in a
 URL, a `)` in link text).
 - [ ] Failing: a type-only file assigning a value of release-kit's `ReleasesResponse` to ui-kit's `ReleasesResponse` compiles under `npm run typecheck`; then implement; commit
   `feat(releases): wire types and fixtures`.
@@ -354,7 +361,7 @@ moved; keep tests of app wiring; delete tests whose subject moved; PR body `## A
 
 - **E1 server.** Modify `server/src/releases/releases.service.ts`: body becomes a `createReleasesReader({ root: releasesRoot })` held by the service,
   `read()` delegating; delete its `git`, `mtime`, `memoKey`, `boundedRead`, `READ_TIMEOUT_MS`; keep `releasesRoot()` (now using release-kit's
-  `findRepoRoot`). Try deleting `release-kit.d.ts` (spec D6) — keep it if `pnpm typecheck` or `nest build` fails, and say so in the PR. Test:
+  `findRepoRoot`, which the service re-exports so `test/releases.e2e.test.ts`'s import keeps working). Try deleting `release-kit.d.ts` (spec D6) — keep it if `pnpm typecheck` or `nest build` fails, and say so in the PR. Test:
   `test/releases.e2e.test.ts` must pass unchanged; add one case "tagless checkout: two requests, one `for-each-ref`" only if the e2e harness can count
   (else skip — covered in B2). Run `pnpm test`, `pnpm typecheck`, `pnpm build:server`.
 - **E2 client.** Delete `client/src/lib/releases.ts`, `hooks/useReleases.ts`, `components/ui/Drawer.tsx`; rewrite `components/ReleasesDrawer.tsx` as a
@@ -371,13 +378,14 @@ moved; keep tests of app wiring; delete tests whose subject moved; PR body `## A
 ### Phase F — backlog-manager
 
 - **F1 server.** `releases.service.ts`: `createReleasesReader({ root: releasesRoot, git: runGit })`; delete `compute`, the filters, `GITHUB`, `cmpVersion`,
-  `memoKey`; `findRepoRoot` from release-kit. Delete `test/api-releases.test.ts`'s deep-equality-with-`readReleases` case; keep its route cases. Add one
+  `memoKey`; `findRepoRoot` from release-kit, re-exported by the service for `test/api-releases.test.ts`. Delete `test/api-releases.test.ts`'s deep-equality-with-`readReleases` case; keep its route cases. Add one
   case: "every git launch in the route goes through `runGit`" (spy on the module) — the invariant. `test/git-run.test.ts`'s no-`*Sync` grep still green.
   Shim: as E1.
 - **F2 client.** Delete `lib/releases.ts`, `hooks/useReleases.ts`, `components/ui/Drawer.tsx`; `ReleasesDrawer.tsx` wrapper calls
   `useDialogEscape(onClose)` and renders ui-kit's with `closeOnEscape={false}`, `narrow={useNarrow()}`, `renderNotes` = a `div` with
-  `renderMarkdown(notes)`. App/SideRail as E2 with `storageKey: 'backlog-manager.releases-last-seen'`. Tests: `test/dialog-escape.test.tsx` gains "drawer
-  open over the item modal: one Escape closes only the drawer"; `releases-drawer.test.tsx` and `releases-app.test.tsx` keep wiring cases;
+  `renderMarkdown(notes)`. App as E2 with `storageKey: 'backlog-manager.releases-last-seen'`; SideRail renders `VersionChip` with
+  `className="rail-release"` (its existing class). Tests: `test/dialog-escape.test.tsx` keeps its existing "closes the What's new drawer over an open item
+  modal" case green under `closeOnEscape={false}` + `useDialogEscape`; `releases-drawer.test.tsx` and `releases-app.test.tsx` keep wiring cases;
   `releases-lib.test.ts` deleted.
 - **F3 CSS + docs.** `--uk-*` mapping in `styles.css` (cyan dot as today); `test/daylight-contrast.test.ts` reads the badge pairs from the mapping;
   `docs/subsystems/releases.md` (why-not-`readReleases` section replaced by "the git port"), `.claude/DESIGN.md` §8.7/§8.10, docs-sync stamp sources.
@@ -386,7 +394,7 @@ moved; keep tests of app wiring; delete tests whose subject moved; PR body `## A
 ### Phase G — claude-agents-dashboard
 
 - **G1 server.** `server/lib/releases.ts`: a module-level reader from `createReleasesReader({ root: () => rootOverride ?? repoRoot(), git:
-  countingPort })` where `countingPort` wraps release-kit's default behaviour and counts `for-each-ref` launches; `overrideReleasesRoot` recreates
+  countingPort })` where `countingPort` wraps release-kit's exported `defaultGitPort()` and counts `for-each-ref` launches; `overrideReleasesRoot` recreates
   the reader and resets the count; `releasesReadCount` returns it. `test/api-releases.test.ts` passes unchanged. `server-deps.test.ts` green (exact pin).
 - **G2 client.** Delete `lib/releases.ts`'s moved functions (keep none unless something else imports them — grep), `hooks/useReleases.ts`;
   `ReleasesDrawer.tsx` wrapper calls `useBackClose(onClose)`, renders ui-kit's with `narrow={useNarrow()}`, `renderNotes={(t) => <Markdown text={t} />}`.
