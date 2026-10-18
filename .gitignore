@@ -2,3 +2,4 @@ node_modules/
 .superpowers/
 .codegraph/
 .DS_Store
+.env
