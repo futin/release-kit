@@ -13,7 +13,7 @@ Shared CI and release parts for futin's Node apps: a reusable PR gate (`ci-node.
 | `scripts/pr-title.mjs` | the CLI wrapper for the title rule (which lives in `src/conventional.ts`); reads `PR_TITLE` from the environment, exit 1 with the reason on a bad title |
 | `scripts/bump-consumer.mjs` | the per-consumer bump `bump-consumers.yml` runs: reads `PKG`, `REPOSITORY`, `CONSUMER`, `VERSION`, `VERSIONS`, `GH_TOKEN` from the environment |
 | `rulesets/main.json` | the `main-pr-only` ruleset |
-| `scripts/apply-repo-settings.sh` | squash-only merge settings + create-or-update the ruleset; `--dry-run` prints the `gh` calls |
+| `scripts/apply-repo-settings.sh` | squash-only merge settings, auto-merge allowed + create-or-update the ruleset; `--dry-run` prints the `gh` calls |
 | `src/release-cli.ts` | the `gh` adapter `release.yml` runs (`dist/esm/release-cli.js`): reads `TARGET_SHA`, `GITHUB_REPOSITORY`, `GH_TOKEN` from the environment |
 | `src/release.ts`, `src/conventional.ts`, `src/git.ts` | the release engine, the title/bump/tag-message rules and the one git launcher |
 | `src/read-releases.ts`, `src/releases-json.ts` | the reader for a Node backend (`readReleases`) and its build-time fallback that writes the same JSON to a file |
@@ -186,14 +186,18 @@ from `HEAD`.
 After every push to `main`, the `bump` job in `self.yml` runs `bump-consumers.yml` once the `release` job is done. It reads the newest annotated `vX.Y.Z` tag
 of this repo and, for each consumer, opens a PR titled `chore(deps): bump release-kit to vX.Y.Z` from branch `bump/release-kit-vX.Y.Z` that pins
 `github:futin/release-kit#vX.Y.Z` in `dependencies` or `devDependencies` and refreshes the consumer's own lockfile. The PR body links each release the bump
-covers. The workflow opens bump PRs and never merges them; the consumer's CI is the gate.
+covers. The workflow never merges a bump PR itself: with the `auto-merge` input on (the default) it enables GitHub auto-merge, as a squash, on each PR it
+opens, so the PR lands once the consumer's CI is green. The consumer's CI stays the gate. Pass `auto-merge: false` to leave every bump PR for a human.
 
 A consumer gets no new PR when it is already on that version, when a PR from that branch is open, or when one was closed, merged or not. A consumer that does
 not depend on the package yet ends green with the warning `<consumer> does not depend on release-kit yet`. On every path, an open bump PR for an older version
 is closed with a comment naming the newer one. No tag at all ends green with a warning and bumps nothing.
 
-- **Declining a version:** close its PR unmerged. That version is never offered again; the next release opens its own PR as usual.
-- **Retitling:** `chore` cuts no release of the app. When the bump changes something the app's users see, retitle it `fix(deps): …` or `feat(deps): …` and
+- **Auto-merge:** enabled only on a PR this run opens, never on one a later run finds open. Disabling it on a PR therefore sticks, and is the step
+  before retitling or declining. It needs "Allow auto-merge" on in the consumer (`scripts/apply-repo-settings.sh` sets it); where it is off the PR is
+  still opened, the job ends green with a warning naming the setting, and that PR waits for a human.
+- **Declining a version:** disable auto-merge, then close its PR unmerged. That version is never offered again; the next release opens its own PR as usual.
+- **Retitling:** `chore` cuts no release of the app. When the bump changes something the app's users see, disable auto-merge and retitle it `fix(deps): …` or `feat(deps): …` and
   add a `## What's new` section before merging.
 - **After merge:** the lockfile changed, so refresh the app's dev-stack `node_modules` the way its README says.
 - **Consumers:** `futin/claude-agents-dashboard`, `futin/backlog-manager`, `futin/guide-manager` and `futin/ui-kit`, listed in the `bump` job of `self.yml`.

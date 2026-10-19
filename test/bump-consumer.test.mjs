@@ -315,3 +315,68 @@ test('CLI: a failed non-gh command exits 1 with the command named', async () => 
   assert.equal(code, 1);
   assert.match(out.join('\n'), /pnpm install --lockfile-only/);
 });
+
+const merges = (calls) => find(calls, 'gh', 'pr', 'merge');
+
+test('autoMerge off (the default): no gh pr merge, body says nothing of auto-merge', async () => {
+  const { run, calls } = fakeRun();
+  const r = await bumpConsumer({ ...base, dir: consumerDir(), run });
+  assert.equal(r.outcome, 'opened');
+  assert.equal(merges(calls).length, 0);
+  assert.doesNotMatch(flag(creates(calls)[0], '--body'), /auto-merge/i);
+});
+
+test('autoMerge on, PR opened: auto-merge enabled on that PR as a squash, after the create', async () => {
+  const { run, calls } = fakeRun({ created: 64 });
+  const r = await bumpConsumer({ ...base, dir: consumerDir(), run, autoMerge: true });
+  assert.equal(r.outcome, 'opened');
+  assert.equal(r.warning, undefined);
+  const [merge] = merges(calls);
+  assert.ok(merge, 'no gh pr merge');
+  assert.equal(merge.args[2], '64');
+  assert.equal(flag(merge, '--repo'), 'futin/x');
+  assert.ok(merge.args.includes('--auto'), `merge is --auto: ${merge.args.join(' ')}`);
+  assert.ok(merge.args.includes('--squash'), `merge is --squash: ${merge.args.join(' ')}`);
+  assert.ok(calls.indexOf(merge) > calls.indexOf(creates(calls)[0]));
+});
+
+test('autoMerge on: the body says how to stop the merge before retitling or declining', async () => {
+  const { run, calls } = fakeRun();
+  await bumpConsumer({ ...base, dir: consumerDir(), run, autoMerge: true });
+  const body = flag(creates(calls)[0], '--body');
+  assert.match(body, /auto-merge/i);
+  assert.match(body, /Disable auto-merge/);
+  assert.match(body, /retitle/i);
+});
+
+test('autoMerge on, PR already open: auto-merge is not touched (a human may have disabled it)', async () => {
+  const { run, calls } = fakeRun({ prs: { [BRANCH]: [{ number: 40, state: 'OPEN' }] } });
+  const r = await bumpConsumer({ ...base, dir: consumerDir(), run, autoMerge: true });
+  assert.equal(r.outcome, 'open');
+  assert.equal(merges(calls).length, 0);
+});
+
+test('autoMerge on, repo disallows it: PR still opened, warning names the setting and apply-repo-settings.sh', async () => {
+  const { run: inner, calls } = fakeRun({ created: 64 });
+  const run = async (cmd, args, opts) =>
+    cmd === 'gh' && args[1] === 'merge'
+      ? (calls.push({ cmd, args, opts }), { code: 1, stdout: '', stderr: 'GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)' })
+      : inner(cmd, args, opts);
+  const r = await bumpConsumer({ ...base, dir: consumerDir(), run, autoMerge: true });
+  assert.equal(r.outcome, 'opened');
+  assert.equal(r.pr, 64);
+  assert.match(r.warning, /#64/);
+  assert.match(r.warning, /Allow auto-merge/);
+  assert.match(r.warning, /apply-repo-settings\.sh/);
+  assert.match(r.warning, /not allowed for this repository/);
+});
+
+test('CLI: AUTO_MERGE=true enables auto-merge; unset or any other value leaves it off', async () => {
+  const env = { PKG: 'ui-kit', REPOSITORY: 'futin/ui-kit', CONSUMER: 'futin/x', VERSION: 'v0.3.0', VERSIONS: 'v0.3.0', GH_TOKEN: 't' };
+  for (const [value, expected] of [['true', 1], [undefined, 0], ['false', 0], ['yes', 0]]) {
+    const { run, calls } = fakeRun();
+    const code = await main({ env: { ...env, ...(value === undefined ? {} : { AUTO_MERGE: value }) }, cwd: consumerDir(), run, log: () => {}, error: () => {} });
+    assert.equal(code, 0);
+    assert.equal(merges(calls).length, expected, `AUTO_MERGE=${value}`);
+  }
+});

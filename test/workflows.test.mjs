@@ -163,10 +163,12 @@ test('self.yml calls release.yml on push with the kit ref of the branch under te
 
 const isKitCheckout = s => (s.uses ?? '').startsWith('actions/checkout@') && s.with?.repository === 'futin/release-kit' && s.with?.path === '.release-kit';
 
-test('bump-consumers.yml declares exactly the four workflow_call inputs and the required secret token', { skip }, () => {
+test('bump-consumers.yml declares exactly the five workflow_call inputs and the required secret token', { skip }, () => {
   const call = load('bump-consumers.yml').on.workflow_call;
-  assert.deepEqual(Object.keys(call.inputs).sort(), ['consumers', 'kit-ref', 'package', 'repository']);
+  assert.deepEqual(Object.keys(call.inputs).sort(), ['auto-merge', 'consumers', 'kit-ref', 'package', 'repository']);
   assert.equal(call.inputs['kit-ref'].default, 'v1');
+  assert.equal(call.inputs['auto-merge'].type, 'boolean');
+  assert.equal(call.inputs['auto-merge'].default, 'true');
   assert.deepEqual(Object.keys(call.secrets), ['token']);
   assert.equal(call.secrets.token.required, 'true');
 });
@@ -202,10 +204,11 @@ test('bump-consumers matrix runs per consumer only when there is a version, fail
   assert.equal(job.env.COREPACK_ENABLE_DOWNLOAD_PROMPT, '0');
 });
 
-test('the bump-consumer.mjs step gets exactly PKG, REPOSITORY, CONSUMER, VERSION, VERSIONS and GH_TOKEN through env', { skip }, () => {
+test('the bump-consumer.mjs step gets exactly PKG, REPOSITORY, CONSUMER, VERSION, VERSIONS, AUTO_MERGE and GH_TOKEN through env', { skip }, () => {
   const step = load('bump-consumers.yml').jobs.bump.steps.find(s => s.run && s.run.includes('bump-consumer.mjs'));
   assert.ok(step, 'no step runs bump-consumer.mjs');
-  assert.deepEqual(Object.keys(step.env).sort(), ['CONSUMER', 'GH_TOKEN', 'PKG', 'REPOSITORY', 'VERSION', 'VERSIONS']);
+  assert.deepEqual(Object.keys(step.env).sort(), ['AUTO_MERGE', 'CONSUMER', 'GH_TOKEN', 'PKG', 'REPOSITORY', 'VERSION', 'VERSIONS']);
+  assert.match(step.env.AUTO_MERGE, /inputs\.auto-merge/);
   assert.match(step.env.PKG, /inputs\.package/);
   assert.match(step.env.REPOSITORY, /inputs\.repository/);
   assert.match(step.env.CONSUMER, /matrix\.consumer/);
