@@ -50,7 +50,7 @@ function rewriteSpec(text, section, pkg, oldSpec, newSpec) {
  *   run: (cmd: string, args: string[], opts?: { cwd?: string }) => Promise<{ code: number, stdout: string, stderr?: string }> }} o
  * @returns {Promise<{ outcome: 'pinned' | 'open' | 'closed' | 'missing' | 'opened', pr?: number, closed: number[], warning?: string }>}
  */
-export async function bumpConsumer({ pkg, repository, consumer, version, versions = [version], dir, run }) {
+export async function bumpConsumer({ pkg, repository, consumer, version, versions = [version], dir, run, autoMerge = false }) {
   const target = parseVersion(version);
   if (!target) throw new Error(`VERSION must look like vX.Y.Z, got ${JSON.stringify(version)}`);
   const branch = `bump/${pkg}-${version}`;
@@ -141,13 +141,34 @@ export async function bumpConsumer({ pkg, repository, consumer, version, version
     `This PR is titled \`chore(deps)\`, which cuts no release of this app. If the bump changes something this app's users see, retitle it ` +
       "`fix(deps): …` or `feat(deps): …` and add a `## What's new` section before merging. To decline this version, close the PR unmerged.",
     '',
+    ...(autoMerge
+      ? [
+          '**Auto-merge is on:** this PR squash-merges as soon as CI is green. To retitle it or decline this version, press **Disable auto-merge** ' +
+            'first — this workflow never turns it back on.',
+          '',
+        ]
+      : []),
     "**After merge:** the lockfile changed, so refresh your dev stack's `node_modules` the way this app's README says.",
   ].join('\n');
   const url = await exec('gh', ['pr', 'create', '--repo', consumer, '--head', branch, '--title', title, '--body', body]);
   const m = /\/pull\/(\d+)/.exec(url);
   if (!m) throw new Error(`gh pr create printed no PR URL: ${url.trim()}`);
   const pr = Number(m[1]);
-  return { outcome: 'opened', pr, closed: await closeSuperseded(supersededBy(pr)) };
+  const closed = await closeSuperseded(supersededBy(pr));
+  // Only here, on the PR this run opened: an open PR found by a later run may have had auto-merge disabled by a human on purpose (to retitle it), and
+  // re-enabling it would merge it out from under them. A refusal is a warning, not a failure — the PR exists and the consumer's CI still gates it; the
+  // usual cause is the repo's "Allow auto-merge" setting being off.
+  if (autoMerge) {
+    const r = await run('gh', ['pr', 'merge', String(pr), '--repo', consumer, '--auto', '--squash'], { cwd: dir });
+    if (r.code !== 0) {
+      const detail = (r.stderr ?? '').trim();
+      const warning =
+        `${consumer}#${pr} was opened but auto-merge could not be enabled${detail ? ` (${detail})` : ''}; turn on "Allow auto-merge" in the repo's ` +
+        'settings (scripts/apply-repo-settings.sh sets it) and merge this one by hand.';
+      return { outcome: 'opened', pr, closed, warning };
+    }
+  }
+  return { outcome: 'opened', pr, closed };
 }
 
 /** Launch a command, capturing stdout and stderr; stderr is also passed through so the job log shows it. */
@@ -188,6 +209,8 @@ export async function main({ env = process.env, cwd = process.cwd(), run = spawn
       versions: versions.length > 0 ? versions : [env.VERSION],
       dir: cwd,
       run,
+      // Exactly 'true', the string a boolean workflow input renders to; anything else, unset included, leaves the PR for a human to merge.
+      autoMerge: env.AUTO_MERGE === 'true',
     });
     if (r.warning) log(`::warning::${r.warning}`);
     log(`${env.CONSUMER}: ${r.outcome}${r.pr ? ` #${r.pr}` : ''}${r.closed.length ? `; closed superseded ${r.closed.map((n) => `#${n}`).join(', ')}` : ''}`);

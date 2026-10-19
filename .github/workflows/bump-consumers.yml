@@ -25,6 +25,10 @@ on:
         description: The release-kit ref the reader and the bump script are taken from; keep it equal to the caller's uses ref.
         type: string
         default: v1
+      auto-merge:
+        description: Enable GitHub auto-merge (squash) on each bump PR this run opens, so it merges once the consumer's CI is green. Needs "Allow auto-merge" on in the consumer.
+        type: boolean
+        default: true
     secrets:
       token:
         description: A PAT scoped to the consumers (Contents, Pull requests and Issues read/write); a PR opened with GITHUB_TOKEN starts no CI.
@@ -122,5 +126,6 @@ jobs:
           CONSUMER: ${{ matrix.consumer }}
           VERSION: ${{ needs.version.outputs.version }}
           VERSIONS: ${{ needs.version.outputs.versions }}
+          AUTO_MERGE: ${{ inputs.auto-merge }}
           GH_TOKEN: ${{ secrets.token }}
         run: node ../.release-kit/scripts/bump-consumer.mjs
