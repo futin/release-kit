@@ -144,6 +144,22 @@ The caller's `ci.yml` must trigger on `edited` (the snippet above already does),
 write `None` (any case, optionally followed by a dash and a reason, e.g. `None — internal only`) as the section's content: the check passes and the
 release carries no notes paragraph — the `None` is dropped from the tag message and the GitHub Release, never shown to readers.
 
+### Adopting rollup releases
+
+`mode: rollup` on the `release.yml` call swaps one tag per PR for one tag per run: every releasable PR since the last version tag goes into a single release,
+bumped by the largest type among them, with one section per scope in the notes. A range holding only `docs`/`chore` PRs (or none) cuts nothing and ends green.
+The default, `per-pr`, is unchanged, so a caller that sets nothing sees no difference.
+
+Change the caller's triggers to a `schedule` (for example `cron: '0 2 * * *'`, nightly) plus `workflow_dispatch` for an on-demand release, drop the `push`
+trigger, and pass `mode: rollup` in `with:`; the rest of the caller from *Adopting releases* stays as it is, including the `concurrency` block, which keeps a
+slow scheduled run and a manual dispatch from tagging at once. `workflow_dispatch` with a `sha` still releases up to that commit.
+
+A scheduled run behaves like a push run, not a dispatch: when a newer release already exists it ends green with `a newer release exists: <tag>` instead of
+failing (`onNewer` is `skip`), since the likeliest cause is a dispatch that got there first. Only a `workflow_dispatch` hears the failure.
+
+GitHub switches off scheduled workflows in a public repo after 60 days without repository activity, and the release then silently stops; a dispatch or any
+push re-enables it. The run reads the default branch from the repo (falling back to the ref the schedule ran on), so no input is needed for it.
+
 ### Re-running
 
 `workflow_dispatch` with a `sha` re-runs the release for that commit and every unreleased commit before it; with no `sha` it uses the branch head. It is

@@ -103,10 +103,15 @@ async function main(): Promise<void> {
   if (!repo) throw new Error('GITHUB_REPOSITORY is not set');
   const branch = process.env.DEFAULT_BRANCH ?? '';
   if (!branch) throw new Error('DEFAULT_BRANCH is not set');
+  // Unset means per-PR, as before; the workflow always passes the input, so an empty string is a caller typo, not a default.
+  const modeEnv = process.env.RELEASE_MODE;
+  if (modeEnv !== undefined && modeEnv !== 'per-pr' && modeEnv !== 'rollup') throw new Error(`RELEASE_MODE must be per-pr or rollup; got ${JSON.stringify(modeEnv)}`);
+  const mode = modeEnv ?? 'per-pr';
   // Only a manual dispatch should hear "a newer release exists"; a re-run of a superseded push run must end green.
+  // A scheduled run skips too: nobody is watching it, and a newer tag only means a dispatch got there first.
   const onNewer = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' ? 'reject' : 'skip';
   const log = createLog();
-  const outcomes = await runRelease({ cwd: process.cwd(), target, github: createGhPort(repo), log, onNewer, trunk: `origin/${branch}` });
+  const outcomes = await runRelease({ cwd: process.cwd(), target, github: createGhPort(repo), log, onNewer, mode, trunk: `origin/${branch}` });
   for (const o of outcomes) log.info(`${o.sha.slice(0, 7)}: ${o.action}${o.version ? ` v${o.version}` : ''}`);
 }
 

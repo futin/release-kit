@@ -122,9 +122,11 @@ test('every setup-node step turns off its package-manager cache (it runs before 
   }
 });
 
-test('release.yml declares exactly the three workflow_call inputs and their defaults', { skip }, () => {
+test('release.yml declares exactly the four workflow_call inputs and their defaults', { skip }, () => {
   const inputs = load('release.yml').on.workflow_call.inputs;
-  assert.deepEqual(Object.keys(inputs).sort(), ['kit-ref', 'node-version', 'sha']);
+  assert.deepEqual(Object.keys(inputs).sort(), ['kit-ref', 'mode', 'node-version', 'sha']);
+  assert.equal(inputs.mode.type, 'string');
+  assert.equal(inputs.mode.default, 'per-pr');
   assert.equal(inputs.sha.default, '');
   assert.equal(inputs['kit-ref'].default, 'v1');
   assert.equal(inputs['node-version'].default, '22');
@@ -159,13 +161,21 @@ test('no run: in release.yml interpolates ${{ }} (title, body and notes are neve
   for (const run of runs(load('release.yml').jobs.release)) assert.ok(!run.includes('${{'), `run: interpolates an expression:\n${run}`);
 });
 
-test('the release CLI step gets TARGET_SHA, GH_TOKEN and DEFAULT_BRANCH through env only', { skip }, () => {
+test('the release CLI step gets TARGET_SHA, GH_TOKEN, RELEASE_MODE and DEFAULT_BRANCH through env only', { skip }, () => {
   const step = load('release.yml').jobs.release.steps.find(s => s.run && s.run.includes('release-cli.js'));
   assert.ok(step, 'no step runs release-cli.js');
   assert.equal(step.run.trim(), 'node .release-kit/dist/esm/release-cli.js');
   assert.match(step.env.TARGET_SHA, /inputs\.sha \|\| github\.sha/);
   assert.match(step.env.GH_TOKEN, /github\.token/);
-  assert.match(step.env.DEFAULT_BRANCH, /github\.event\.repository\.default_branch/);
+  assert.equal(step.env.RELEASE_MODE, '${{ inputs.mode }}');
+  // A scheduled run has no push or repository payload to read the default branch from, so the ref name stands in (a schedule always runs on it).
+  assert.equal(step.env.DEFAULT_BRANCH, '${{ github.event.repository.default_branch || github.ref_name }}');
+});
+
+test('the release.yml header covers rollup mode and scheduled runs, not push only', () => {
+  const header = readFileSync(WF('release.yml'), 'utf8').split('\nname:')[0];
+  assert.match(header, /rollup/i);
+  assert.match(header, /schedule/i);
 });
 
 test('self.yml calls release.yml on push with the kit ref of the branch under test', { skip }, () => {
