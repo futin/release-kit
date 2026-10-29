@@ -99,7 +99,7 @@ async function releaseCommit(cwd, github, log, sha) {
         throw new Error(`no baseline tag reachable from ${sha}`);
     const tag = `v${(0, conventional_js_1.nextVersion)(base, type, breaking)}`;
     // Steps 5 and 6: the tag reaches the remote before the Release, because `gh release create --verify-tag` refuses a tag it cannot find there.
-    const message = (0, conventional_js_1.formatTagMessage)({ title: pull.title, pr: pull.number, notes: (0, conventional_js_1.extractWhatsNew)(pull.body), type, scope: check.scope, breaking });
+    const message = (0, conventional_js_1.formatTagMessage)({ title: pull.title, pr: pull.number, notes: (0, conventional_js_1.releaseNotes)(pull.body), type, scope: check.scope, breaking });
     await pushTag(cwd, tag, sha, message);
     await createRelease(cwd, github, tag);
     return { sha, action: 'released', version: tag.slice(1) };

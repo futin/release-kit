@@ -8,6 +8,8 @@ exports.isBreaking = isBreaking;
 exports.parseVersion = parseVersion;
 exports.nextVersion = nextVersion;
 exports.extractWhatsNew = extractWhatsNew;
+exports.isNoneOptOut = isNoneOptOut;
+exports.releaseNotes = releaseNotes;
 exports.formatTagMessage = formatTagMessage;
 exports.parseTagMessage = parseTagMessage;
 const RELEASING = /^(feat|fix|perf)(?:\(([a-z0-9-]+)\))?(!)?: (.+)$/;
@@ -68,6 +70,15 @@ function extractWhatsNew(body) {
     const rest = lines.slice(start + 1);
     const end = rest.findIndex((l) => l.startsWith('## ') || l.startsWith('🤖 Generated with'));
     return (end < 0 ? rest : rest.slice(0, end)).join('\n').replace(/^\n+/, '').trimEnd();
+}
+/** True when a What's new section is the author's explicit opt-out: `None`, optionally followed by a dash and a reason. */
+function isNoneOptOut(notes) {
+    return /^None(\s+[—-]\s+.+)?$/i.test(notes.trim());
+}
+/** The notes a release carries for a PR body: its What's new section, or nothing when the author opted out with `None`. */
+function releaseNotes(body) {
+    const notes = extractWhatsNew(body);
+    return isNoneOptOut(notes) ? '' : notes;
 }
 /** The annotated-tag message the release workflow writes and the reader parses (spec §Tag message — the contract). */
 function formatTagMessage(r) {

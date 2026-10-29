@@ -3,7 +3,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkTitle, extractWhatsNew, formatTagMessage, isBreaking, nextVersion, parseTagMessage, RELEASE_TYPES } from './conventional.js';
+import { checkTitle, formatTagMessage, isBreaking, nextVersion, parseTagMessage, RELEASE_TYPES, releaseNotes } from './conventional.js';
 import type { ReleaseType } from './conventional.js';
 import { DESCRIBE_FILTER, git, versionTags, versionTagsAt } from './git.js';
 
@@ -115,7 +115,7 @@ async function releaseCommit(cwd: string, github: GitHubPort, log: Log, sha: str
   const tag = `v${nextVersion(base, type, breaking)}`;
 
   // Steps 5 and 6: the tag reaches the remote before the Release, because `gh release create --verify-tag` refuses a tag it cannot find there.
-  const message = formatTagMessage({ title: pull.title, pr: pull.number, notes: extractWhatsNew(pull.body), type, scope: check.scope, breaking });
+  const message = formatTagMessage({ title: pull.title, pr: pull.number, notes: releaseNotes(pull.body), type, scope: check.scope, breaking });
   await pushTag(cwd, tag, sha, message);
   await createRelease(cwd, github, tag);
   return { sha, action: 'released', version: tag.slice(1) };

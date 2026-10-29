@@ -59,6 +59,15 @@ export function extractWhatsNew(body) {
     const end = rest.findIndex((l) => l.startsWith('## ') || l.startsWith('🤖 Generated with'));
     return (end < 0 ? rest : rest.slice(0, end)).join('\n').replace(/^\n+/, '').trimEnd();
 }
+/** True when a What's new section is the author's explicit opt-out: `None`, optionally followed by a dash and a reason. */
+export function isNoneOptOut(notes) {
+    return /^None(\s+[—-]\s+.+)?$/i.test(notes.trim());
+}
+/** The notes a release carries for a PR body: its What's new section, or nothing when the author opted out with `None`. */
+export function releaseNotes(body) {
+    const notes = extractWhatsNew(body);
+    return isNoneOptOut(notes) ? '' : notes;
+}
 /** The annotated-tag message the release workflow writes and the reader parses (spec §Tag message — the contract). */
 export function formatTagMessage(r) {
     const trailers = [`Release-Type: ${r.type}`];

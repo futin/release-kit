@@ -383,3 +383,15 @@ test('the released tag message is formatTagMessage of the PR, and its notes keep
     assert.match(expected, /^#12 is the tracking issue$/m);
   });
 });
+
+test('a per-PR release whose What\'s new is None writes a tag message with no notes paragraph', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.1.0', base, BASELINE);
+    const a = r.commit('fix(api): tidy (#5)');
+    const f = fake({ releases: ['v0.1.0'], pulls: { [a]: [pr(5, 'fix(api): tidy', a, "## What's new\n\nNone — internal only\n")] } });
+    assert.deepEqual((await run(r, f, a, 'reject'))[1], { sha: a, action: 'released', version: '0.1.1' });
+    assert.equal(await originMessage(r, 'v0.1.1'), 'fix(api): tidy (#5)\n\nRelease-Type: fix\nRelease-Scope: api\nRelease-PR: 5');
+    assert.deepEqual(f.created, [{ tag: 'v0.1.1', title: 'fix(api): tidy (#5)', notes: '' }]);
+  });
+});

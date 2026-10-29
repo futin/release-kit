@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { checkTitle, extractWhatsNew, formatTagMessage, isBreaking, nextVersion, parseTagMessage, parseVersion } from '../src/index.js';
+import { checkTitle, extractWhatsNew, formatTagMessage, isBreaking, isNoneOptOut, nextVersion, parseTagMessage, parseVersion, releaseNotes } from '../src/index.js';
 
 const bump = (base: string, type: 'feat' | 'fix' | 'perf', breaking: boolean) => nextVersion(base, type, breaking);
 
@@ -145,4 +145,18 @@ test('parseTagMessage: a last paragraph with a non-trailer line is not trailers'
 
 test('parseTagMessage: a trailer block without Release-Type is not trailers', () => {
   assert.equal(parseTagMessage('fix: x (#1)\n\nRelease-PR: 1\n').type, 'baseline');
+});
+
+test('isNoneOptOut: true for None in any case, with or without a dash reason, and surrounding whitespace', () => {
+  for (const n of ['None', 'none', 'None — internal only', 'None - internal', '  None  ']) assert.equal(isNoneOptOut(n), true, JSON.stringify(n));
+});
+
+test('isNoneOptOut: false for empty text and for notes that merely start with None', () => {
+  for (const n of ['', 'Nonexistent flag fixed', 'None of the tabs flicker now', '- None']) assert.equal(isNoneOptOut(n), false, JSON.stringify(n));
+});
+
+test('releaseNotes: a None section is empty, real notes pass through unchanged', () => {
+  assert.equal(releaseNotes("## What's new\n\nNone — refactor\n\n## Verification\n\nx"), '');
+  assert.equal(releaseNotes("## What's new\n\nTabs stop flickering.\n\n### Detail\nmore\n"), "Tabs stop flickering.\n\n### Detail\nmore");
+  assert.equal(releaseNotes(null), '');
 });

@@ -68,6 +68,17 @@ export function extractWhatsNew(body: string | null): string {
   return (end < 0 ? rest : rest.slice(0, end)).join('\n').replace(/^\n+/, '').trimEnd();
 }
 
+/** True when a What's new section is the author's explicit opt-out: `None`, optionally followed by a dash and a reason. */
+export function isNoneOptOut(notes: string): boolean {
+  return /^None(\s+[—-]\s+.+)?$/i.test(notes.trim());
+}
+
+/** The notes a release carries for a PR body: its What's new section, or nothing when the author opted out with `None`. */
+export function releaseNotes(body: string | null): string {
+  const notes = extractWhatsNew(body);
+  return isNoneOptOut(notes) ? '' : notes;
+}
+
 export type TagFields = { title: string; pr: number; notes: string; type: ReleaseType; scope?: string; breaking: boolean };
 export type ParsedTag = { subject: string; title: string; type: ReleaseType | 'baseline'; scope?: string; pr?: number; breaking: boolean; notes: string };
 

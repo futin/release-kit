@@ -20,6 +20,10 @@ export declare function nextVersion(base: string, type: ReleaseType, breaking: b
  * blocks that themselves contain `## ` headings, and a commented section must count as absent. Deeper headings (`###`) stay inside the notes.
  */
 export declare function extractWhatsNew(body: string | null): string;
+/** True when a What's new section is the author's explicit opt-out: `None`, optionally followed by a dash and a reason. */
+export declare function isNoneOptOut(notes: string): boolean;
+/** The notes a release carries for a PR body: its What's new section, or nothing when the author opted out with `None`. */
+export declare function releaseNotes(body: string | null): string;
 export type TagFields = {
     title: string;
     pr: number;

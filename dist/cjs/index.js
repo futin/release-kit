@@ -1,14 +1,16 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runRelease = exports.findRepoRoot = exports.createReleasesReader = exports.writeReleasesJson = exports.readReleasesResult = exports.readReleases = exports.defaultGitPort = exports.parseVersion = exports.parseTagMessage = exports.nextVersion = exports.isBreaking = exports.formatTagMessage = exports.extractWhatsNew = exports.checkTitle = void 0;
+exports.runRelease = exports.findRepoRoot = exports.createReleasesReader = exports.writeReleasesJson = exports.readReleasesResult = exports.readReleases = exports.defaultGitPort = exports.releaseNotes = exports.parseVersion = exports.parseTagMessage = exports.nextVersion = exports.isNoneOptOut = exports.isBreaking = exports.formatTagMessage = exports.extractWhatsNew = exports.checkTitle = void 0;
 var conventional_js_1 = require("./conventional.js");
 Object.defineProperty(exports, "checkTitle", { enumerable: true, get: function () { return conventional_js_1.checkTitle; } });
 Object.defineProperty(exports, "extractWhatsNew", { enumerable: true, get: function () { return conventional_js_1.extractWhatsNew; } });
 Object.defineProperty(exports, "formatTagMessage", { enumerable: true, get: function () { return conventional_js_1.formatTagMessage; } });
 Object.defineProperty(exports, "isBreaking", { enumerable: true, get: function () { return conventional_js_1.isBreaking; } });
+Object.defineProperty(exports, "isNoneOptOut", { enumerable: true, get: function () { return conventional_js_1.isNoneOptOut; } });
 Object.defineProperty(exports, "nextVersion", { enumerable: true, get: function () { return conventional_js_1.nextVersion; } });
 Object.defineProperty(exports, "parseTagMessage", { enumerable: true, get: function () { return conventional_js_1.parseTagMessage; } });
 Object.defineProperty(exports, "parseVersion", { enumerable: true, get: function () { return conventional_js_1.parseVersion; } });
+Object.defineProperty(exports, "releaseNotes", { enumerable: true, get: function () { return conventional_js_1.releaseNotes; } });
 var git_js_1 = require("./git.js");
 Object.defineProperty(exports, "defaultGitPort", { enumerable: true, get: function () { return git_js_1.defaultGitPort; } });
 var read_releases_js_1 = require("./read-releases.js");
