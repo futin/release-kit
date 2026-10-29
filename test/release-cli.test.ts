@@ -177,6 +177,45 @@ describe('release-cli', () => {
     assert.match(r.stdout, /^::error::/m);
   });
 
+  describe('RELEASE_MODE', () => {
+    const tagMessage = (repo: TestRepo, tag: string): string => spawnSync('git', ['tag', '--list', tag, '--format=%(contents)'], { cwd: repo.dir, encoding: 'utf8' }).stdout;
+
+    function withPr(env: Record<string, string | undefined>) {
+      const { repo, gh } = setup();
+      const sha = repo.commit('feat: a thing (#7)');
+      canned(gh, `repos/${REPO}/commits/${sha}/pulls`, [pullJson(7, 'feat: a thing', null, sha)]);
+      return { repo, gh, r: runCli(repo, gh, { TARGET_SHA: sha, ...env }) };
+    }
+
+    it('RELEASE_MODE=rollup cuts one rollup tag (Release-Items, no Release-PR)', () => {
+      const { repo, r } = withPr({ RELEASE_MODE: 'rollup' });
+      assert.equal(r.status, 0, r.stderr + r.stdout);
+      const message = tagMessage(repo, 'v0.2.0');
+      assert.match(message, /^Release-Items: ~7:feat$/m);
+      assert.doesNotMatch(message, /Release-PR/);
+    });
+
+    for (const RELEASE_MODE of [undefined, 'per-pr']) {
+      it(`${RELEASE_MODE === undefined ? 'an unset RELEASE_MODE' : 'RELEASE_MODE=per-pr'} stays per-PR`, () => {
+        const { repo, r } = withPr({ RELEASE_MODE });
+        assert.equal(r.status, 0, r.stderr + r.stdout);
+        const message = tagMessage(repo, 'v0.2.0');
+        assert.match(message, /^Release-PR: 7$/m);
+        assert.doesNotMatch(message, /Release-Items/);
+      });
+    }
+
+    it('any other RELEASE_MODE exits 1 naming it, before any gh call or tag', () => {
+      for (const RELEASE_MODE of ['nightly', 'Rollup', '']) {
+        const { repo, gh, r } = withPr({ RELEASE_MODE });
+        assert.equal(r.status, 1, `RELEASE_MODE=${JSON.stringify(RELEASE_MODE)}`);
+        assert.match(r.stdout, /^::error::.*RELEASE_MODE/m);
+        assert.deepEqual(calls(gh), []);
+        assert.equal(spawnSync('git', ['tag', '--list', 'v0.2.0'], { cwd: repo.dir, encoding: 'utf8' }).stdout.trim(), '');
+      }
+    });
+  });
+
   describe('a newer release exists', () => {
     // v0.1.0 at the baseline, a commit that is the target, then a later commit already carrying v0.2.0.
     function withNewer() {

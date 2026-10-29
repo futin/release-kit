@@ -20,6 +20,18 @@ export declare function nextVersion(base: string, type: ReleaseType, breaking: b
  * blocks that themselves contain `## ` headings, and a commented section must count as absent. Deeper headings (`###`) stay inside the notes.
  */
 export declare function extractWhatsNew(body: string | null): string;
+/** True when a What's new section is the author's explicit opt-out: `None`, optionally followed by a dash and a reason. */
+export declare function isNoneOptOut(notes: string): boolean;
+/** The notes a release carries for a PR body: its What's new section, or nothing when the author opted out with `None`. */
+export declare function releaseNotes(body: string | null): string;
+/**
+ * The opt-in notes rule: a PR whose title cuts a release (feat|fix|perf) needs a non-empty `## What's new` section, or `None` to opt out. Other types and
+ * titles `checkTitle` already refuses pass here, so a bad title is reported once, by the title check.
+ */
+export declare function checkNotes(title: string, body: string | null): {
+    ok: boolean;
+    reason?: string;
+};
 export type TagFields = {
     title: string;
     pr: number;
@@ -28,6 +40,16 @@ export type TagFields = {
     scope?: string;
     breaking: boolean;
 };
+/** One PR inside a parsed tag. `title` is set on a per-PR tag's item (the full PR title) and on a rollup's title-only item (its prefix stripped). */
+export type ParsedItem = {
+    pr: number;
+    type: ReleaseType;
+    scope?: string;
+    breaking: boolean;
+    title?: string;
+    notes: string;
+};
+/** `items` is empty for the baseline tag, one item for a per-PR tag, and every rolled-up PR in body order for a rollup tag. */
 export type ParsedTag = {
     subject: string;
     title: string;
@@ -36,8 +58,27 @@ export type ParsedTag = {
     pr?: number;
     breaking: boolean;
     notes: string;
+    items: ParsedItem[];
+};
+/** One PR going into a rollup tag; `title` is the full PR title, `notes` its release notes or empty. */
+export type RollupItem = {
+    pr: number;
+    title: string;
+    type: ReleaseType;
+    scope?: string;
+    breaking: boolean;
+    notes: string;
 };
 /** The annotated-tag message the release workflow writes and the reader parses (spec §Tag message — the contract). */
 export declare function formatTagMessage(r: TagFields): string;
-/** Inverse of {@link formatTagMessage}. A message without a `Release-Type` trailer block (the baseline tag) parses as type `baseline`. */
+/**
+ * The annotated-tag message of a rollup release: many PRs, oldest first, under one tag (plan §Wire format). The body groups items by scope under `###`
+ * headings, so the tag must be written with `--cleanup=verbatim` or git strips them as comments. The trailer block never carries `Release-PR` or
+ * `Release-Scope`, which is what makes a v1.3.0 reader show the rollup as one release with the grouped body as its notes.
+ */
+export declare function formatRollupMessage(items: RollupItem[]): string;
+/**
+ * Inverse of {@link formatTagMessage} and {@link formatRollupMessage}. A message without a `Release-Type` trailer block (the baseline tag) parses as type
+ * `baseline`. `title` and `notes` are the subject and pre-trailer body for every kind of tag; `items` is parsed in addition.
+ */
 export declare function parseTagMessage(msg: string): ParsedTag;

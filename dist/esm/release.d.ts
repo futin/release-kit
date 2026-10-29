@@ -26,6 +26,9 @@ export type Outcome = {
  * where the operator should hear it), 'skip' resolves to `[]` after an info line (a re-run of a superseded push run, which must end green). Either way
  * nothing is tagged, because a re-run could otherwise tag a commit that was skipped as no-pr out of order. A `target` that is not on `trunk` (a ref
  * resolvable in `cwd`, such as `origin/main`) rejects first, in both modes: a dispatch could otherwise tag a commit that never reached the default branch.
+ *
+ * `mode: 'rollup'` (default `'per-pr'`) cuts one tag on `target` instead, bumped by the largest item, whose message is {@link formatRollupMessage} of every
+ * releasable PR in the range; each of their outcomes is `released` with that one version. A range with nothing releasable cuts no tag and no Release.
  */
 export declare function runRelease(o: {
     cwd: string;
@@ -34,4 +37,5 @@ export declare function runRelease(o: {
     log: Log;
     onNewer: 'reject' | 'skip';
     trunk: string;
+    mode?: 'per-pr' | 'rollup';
 }): Promise<Outcome[]>;

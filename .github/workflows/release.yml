@@ -1,4 +1,6 @@
-# Reusable release workflow: tags every unreleased feat|fix|perf PR merged to main and publishes its GitHub Release (README §Adopting releases).
+# Reusable release workflow: tags the unreleased feat|fix|perf PRs merged to main and publishes the GitHub Release (README §Adopting releases).
+# `mode: per-pr` (default) tags each PR as its push lands; `mode: rollup` cuts one tag for every releasable PR since the last tag and is meant to run from a
+# `schedule` or `workflow_dispatch` caller (README §Adopting rollup releases).
 # Two rules hold it together:
 #   - a PR title, body or release note never appears inside `run:` through `${{ }}` — they reach `gh` and `git` only as argv elements or files read by
 #     the CLI, so text such as `$(id)` stays text;
@@ -20,6 +22,10 @@ on:
       node-version:
         type: string
         default: '22'
+      mode:
+        description: per-pr tags each releasable PR; rollup cuts one tag for every releasable PR in the range (README §Adopting rollup releases).
+        type: string
+        default: per-pr
 
 jobs:
   release:
@@ -50,6 +56,8 @@ jobs:
         env:
           TARGET_SHA: ${{ inputs.sha || github.sha }}
           GH_TOKEN: ${{ github.token }}
-          # A dispatch sha off the default branch is refused; the engine compares it with origin/<this>.
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          # A dispatch sha off the default branch is refused; the engine compares it with origin/<this>. A schedule carries no repository payload but always
+          # runs on the default branch, so the ref name stands in.
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || github.ref_name }}
         run: node .release-kit/dist/esm/release-cli.js

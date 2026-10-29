@@ -24,15 +24,17 @@ function runs(job) {
   return (job.steps ?? []).map(s => s.run).filter(Boolean);
 }
 
-test('ci-node.yml declares exactly the six workflow_call inputs and their defaults', { skip }, () => {
+test('ci-node.yml declares exactly the seven workflow_call inputs and their defaults', { skip }, () => {
   const inputs = load('ci-node.yml').on.workflow_call.inputs;
-  assert.deepEqual(Object.keys(inputs).sort(), ['check-commands', 'install-command', 'kit-ref', 'node-version', 'skills-command', 'skills-paths']);
+  assert.deepEqual(Object.keys(inputs).sort(), ['check-commands', 'install-command', 'kit-ref', 'node-version', 'require-notes', 'skills-command', 'skills-paths']);
   assert.equal(inputs['node-version'].default, '22');
   assert.equal(inputs['install-command'].default, '');
   assert.equal(inputs['check-commands'].required, 'true');
   assert.equal(inputs['skills-command'].default, '');
   assert.equal(inputs['skills-paths'].default, '');
   assert.equal(inputs['kit-ref'].default, 'v1');
+  assert.equal(inputs['require-notes'].type, 'boolean');
+  assert.equal(inputs['require-notes'].default, 'false');
 });
 
 test('ci-node.yml has exactly the jobs checks, pr-title, skills', { skip }, () => {
@@ -65,6 +67,20 @@ test('pr-title passes the title through env PR_TITLE and runs the kit checkout',
   assert.ok(step, 'no step runs pr-title.mjs');
   assert.match(step.env.PR_TITLE, /github\.event\.pull_request\.title/);
   assert.ok(job.steps.some(s => s.with && s.with.repository === 'futin/release-kit' && s.with.path === '.release-kit'));
+});
+
+test('pr-title carries the notes check through env: REQUIRE_NOTES from the input, PR_BODY from the PR body', { skip }, () => {
+  const step = load('ci-node.yml').jobs['pr-title'].steps.find(s => s.run && s.run.includes('pr-title.mjs'));
+  assert.match(step.env.REQUIRE_NOTES, /inputs\.require-notes/);
+  assert.match(step.env.PR_BODY, /github\.event\.pull_request\.body/);
+});
+
+test('no run: in ci-node.yml or self.yml interpolates the PR body', { skip }, () => {
+  for (const file of ['ci-node.yml', 'self.yml']) {
+    for (const [id, job] of Object.entries(load(file).jobs)) {
+      for (const run of runs(job)) assert.ok(!run.includes('pull_request.body'), `${file} job ${id} interpolates the body in run:`);
+    }
+  }
 });
 
 test('top-level permissions are contents: read', { skip }, () => {
@@ -106,9 +122,11 @@ test('every setup-node step turns off its package-manager cache (it runs before 
   }
 });
 
-test('release.yml declares exactly the three workflow_call inputs and their defaults', { skip }, () => {
+test('release.yml declares exactly the four workflow_call inputs and their defaults', { skip }, () => {
   const inputs = load('release.yml').on.workflow_call.inputs;
-  assert.deepEqual(Object.keys(inputs).sort(), ['kit-ref', 'node-version', 'sha']);
+  assert.deepEqual(Object.keys(inputs).sort(), ['kit-ref', 'mode', 'node-version', 'sha']);
+  assert.equal(inputs.mode.type, 'string');
+  assert.equal(inputs.mode.default, 'per-pr');
   assert.equal(inputs.sha.default, '');
   assert.equal(inputs['kit-ref'].default, 'v1');
   assert.equal(inputs['node-version'].default, '22');
@@ -143,13 +161,21 @@ test('no run: in release.yml interpolates ${{ }} (title, body and notes are neve
   for (const run of runs(load('release.yml').jobs.release)) assert.ok(!run.includes('${{'), `run: interpolates an expression:\n${run}`);
 });
 
-test('the release CLI step gets TARGET_SHA, GH_TOKEN and DEFAULT_BRANCH through env only', { skip }, () => {
+test('the release CLI step gets TARGET_SHA, GH_TOKEN, RELEASE_MODE and DEFAULT_BRANCH through env only', { skip }, () => {
   const step = load('release.yml').jobs.release.steps.find(s => s.run && s.run.includes('release-cli.js'));
   assert.ok(step, 'no step runs release-cli.js');
   assert.equal(step.run.trim(), 'node .release-kit/dist/esm/release-cli.js');
   assert.match(step.env.TARGET_SHA, /inputs\.sha \|\| github\.sha/);
   assert.match(step.env.GH_TOKEN, /github\.token/);
-  assert.match(step.env.DEFAULT_BRANCH, /github\.event\.repository\.default_branch/);
+  assert.equal(step.env.RELEASE_MODE, '${{ inputs.mode }}');
+  // A scheduled run has no push or repository payload to read the default branch from, so the ref name stands in (a schedule always runs on it).
+  assert.equal(step.env.DEFAULT_BRANCH, '${{ github.event.repository.default_branch || github.ref_name }}');
+});
+
+test('the release.yml header covers rollup mode and scheduled runs, not push only', () => {
+  const header = readFileSync(WF('release.yml'), 'utf8').split('\nname:')[0];
+  assert.match(header, /rollup/i);
+  assert.match(header, /schedule/i);
 });
 
 test('self.yml calls release.yml on push with the kit ref of the branch under test', { skip }, () => {

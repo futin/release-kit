@@ -1,5 +1,9 @@
-import type { ReleaseType } from './conventional.js';
+import type { ParsedItem, ReleaseType } from './conventional.js';
 import type { GitPort } from './git.js';
+/** One PR's change inside a release; `url` is its PR page when the origin is GitHub. */
+export type ReleaseItem = ParsedItem & {
+    url?: string;
+};
 export type Release = {
     version: string;
     date: string;
@@ -10,6 +14,8 @@ export type Release = {
     breaking: boolean;
     notes: string;
     url?: string;
+    /** Empty for a baseline, one for a per-PR tag, one per PR for a rollup tag. */
+    items: ReleaseItem[];
 };
 export type ReleasesResponse = {
     current: {

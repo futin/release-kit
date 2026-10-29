@@ -4,9 +4,9 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // The CLI runs from a bare checkout of the kit with no install, so it may import only committed dist/.
-import { checkTitle } from '../dist/esm/conventional.js';
+import { checkNotes, checkTitle } from '../dist/esm/conventional.js';
 
-export { checkTitle };
+export { checkNotes, checkTitle };
 
 function isMain() {
   try {
@@ -17,7 +17,7 @@ function isMain() {
 }
 
 if (isMain()) {
-  // The title arrives through the environment, never the command line: the workflow must not interpolate it into a shell (script injection).
+  // The title and body arrive through the environment, never the command line: the workflow must not interpolate them into a shell (script injection).
   if (process.env.PR_TITLE === undefined) {
     console.error('PR_TITLE is not set; the workflow passes the PR title through env PR_TITLE');
     process.exit(1);
@@ -28,5 +28,13 @@ if (isMain()) {
   } else {
     console.error(r.reason);
     process.exit(1);
+  }
+  // Opt-in: a caller that sets require-notes gets the What's new rule too; an unset PR_BODY counts as an empty body.
+  if (process.env.REQUIRE_NOTES === 'true') {
+    const n = checkNotes(process.env.PR_TITLE, process.env.PR_BODY ?? null);
+    if (!n.ok) {
+      console.error(n.reason);
+      process.exit(1);
+    }
   }
 }

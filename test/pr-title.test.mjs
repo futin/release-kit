@@ -85,3 +85,41 @@ test('CLI exits 1 naming PR_TITLE when it is unset', () => {
   assert.equal(r.status, 1);
   assert.match(r.stdout + r.stderr, /PR_TITLE/);
 });
+
+const cli = (env) => {
+  const base = { ...process.env };
+  delete base.PR_BODY;
+  delete base.REQUIRE_NOTES;
+  return spawnSync(process.execPath, [CLI], { env: { ...base, ...env }, encoding: 'utf8' });
+};
+
+test("CLI with REQUIRE_NOTES=true exits 1 naming What's new when a releasing PR has no notes, also with PR_BODY unset", () => {
+  for (const env of [{ PR_BODY: '' }, { PR_BODY: "## What's new\n\n\n## Verification\n\nx" }, {}]) {
+    const r = cli({ PR_TITLE: 'fix: a', REQUIRE_NOTES: 'true', ...env });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /What's new/);
+  }
+});
+
+test('CLI without REQUIRE_NOTES still exits 0 for the same input', () => {
+  const r = cli({ PR_TITLE: 'fix: a', PR_BODY: '' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^ok: fix/);
+});
+
+test('CLI with REQUIRE_NOTES=true exits 0 for notes, a None opt-out and a silent type', () => {
+  for (const [title, body] of [
+    ['feat: a', "## What's new\n\nShips a.\n"],
+    ['fix: a', "## What's new\n\nNone — internal\n"],
+    ['docs: a', ''],
+  ]) {
+    const r = cli({ PR_TITLE: title, PR_BODY: body, REQUIRE_NOTES: 'true' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  }
+});
+
+test('CLI with REQUIRE_NOTES=true still reports a bad title first', () => {
+  const r = cli({ PR_TITLE: 'style: x', PR_BODY: '', REQUIRE_NOTES: 'true' });
+  assert.equal(r.status, 1);
+  assert.doesNotMatch(r.stderr, /What's new/);
+});

@@ -3,7 +3,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkTitle, extractWhatsNew, formatTagMessage, isBreaking, nextVersion, parseTagMessage, RELEASE_TYPES } from './conventional.js';
+import { checkTitle, formatRollupMessage, formatTagMessage, isBreaking, nextVersion, parseTagMessage, RELEASE_TYPES, releaseNotes } from './conventional.js';
 import { DESCRIBE_FILTER, git, versionTags, versionTagsAt } from './git.js';
 // `git describe` has no machine-readable "nothing to describe"; its stderr is the only signal, and any other failure must still surface.
 const NO_TAG = /No (names found|annotated tags|tags can describe)/;
@@ -67,7 +67,8 @@ async function createRelease(cwd, github, tag) {
     const { subject, notes } = parseTagMessage(await git(cwd, ['for-each-ref', '--format=%(contents)', `refs/tags/${tag}`]));
     await github.createRelease(tag, subject, notes);
 }
-async function releaseCommit(cwd, github, log, sha) {
+// In rollup mode a releasable commit is not tagged here: it hands back its item, and runRelease tags the target once for all of them.
+async function releaseCommit(cwd, github, log, sha, rollup) {
     // Step 1: a tag with its Release is done; a tag without one (step 6 failed earlier) only needs step 6.
     const [existing] = await versionTagsAt(cwd, sha);
     if (existing) {
@@ -90,13 +91,15 @@ async function releaseCommit(cwd, github, log, sha) {
     }
     const type = check.type;
     const breaking = isBreaking(check, pull.body);
+    if (rollup)
+        return { pr: pull.number, title: pull.title, type, scope: check.scope, breaking, notes: releaseNotes(pull.body) };
     // Step 4: described at this commit, so a tag made earlier in this same run is the base.
     const base = await describeBase(cwd, sha);
     if (!base)
         throw new Error(`no baseline tag reachable from ${sha}`);
     const tag = `v${nextVersion(base, type, breaking)}`;
     // Steps 5 and 6: the tag reaches the remote before the Release, because `gh release create --verify-tag` refuses a tag it cannot find there.
-    const message = formatTagMessage({ title: pull.title, pr: pull.number, notes: extractWhatsNew(pull.body), type, scope: check.scope, breaking });
+    const message = formatTagMessage({ title: pull.title, pr: pull.number, notes: releaseNotes(pull.body), type, scope: check.scope, breaking });
     await pushTag(cwd, tag, sha, message);
     await createRelease(cwd, github, tag);
     return { sha, action: 'released', version: tag.slice(1) };
@@ -107,6 +110,9 @@ async function releaseCommit(cwd, github, log, sha) {
  * where the operator should hear it), 'skip' resolves to `[]` after an info line (a re-run of a superseded push run, which must end green). Either way
  * nothing is tagged, because a re-run could otherwise tag a commit that was skipped as no-pr out of order. A `target` that is not on `trunk` (a ref
  * resolvable in `cwd`, such as `origin/main`) rejects first, in both modes: a dispatch could otherwise tag a commit that never reached the default branch.
+ *
+ * `mode: 'rollup'` (default `'per-pr'`) cuts one tag on `target` instead, bumped by the largest item, whose message is {@link formatRollupMessage} of every
+ * releasable PR in the range; each of their outcomes is `released` with that one version. A range with nothing releasable cuts no tag and no Release.
  */
 export async function runRelease(o) {
     const { cwd, github, log } = o;
@@ -129,8 +135,19 @@ export async function runRelease(o) {
     const baseCommit = await git(cwd, ['rev-parse', `${base}^{commit}`]);
     const range = await git(cwd, ['rev-list', '--first-parent', '--reverse', `${base}..${target}`]);
     const commits = [baseCommit, ...(range ? range.split('\n') : [])];
-    const outcomes = [];
+    const rollup = o.mode === 'rollup';
+    const results = [];
     for (const sha of commits)
-        outcomes.push(await releaseCommit(cwd, github, log, sha));
-    return outcomes;
+        results.push({ sha, result: await releaseCommit(cwd, github, log, sha, rollup) });
+    const items = results.flatMap(({ result }) => ('pr' in result ? [result] : []));
+    let version;
+    if (items.length) {
+        // RELEASE_TYPES is in rank order, so the first type any item has is the largest bump. `base` was described at the target, which no step above tagged.
+        const type = RELEASE_TYPES.find((t) => items.some((i) => i.type === t));
+        version = nextVersion(base, type, items.some((i) => i.breaking));
+        const tag = `v${version}`;
+        await pushTag(cwd, tag, target, formatRollupMessage(items));
+        await createRelease(cwd, github, tag);
+    }
+    return results.map(({ sha, result }) => ('pr' in result ? { sha, action: 'released', version } : result));
 }

@@ -3,8 +3,8 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkTitle, extractWhatsNew, formatTagMessage, isBreaking, nextVersion, parseTagMessage, RELEASE_TYPES } from './conventional.js';
-import type { ReleaseType } from './conventional.js';
+import { checkTitle, formatRollupMessage, formatTagMessage, isBreaking, nextVersion, parseTagMessage, RELEASE_TYPES, releaseNotes } from './conventional.js';
+import type { ReleaseType, RollupItem } from './conventional.js';
 import { DESCRIBE_FILTER, git, versionTags, versionTagsAt } from './git.js';
 
 export type PullRequest = { number: number; title: string; body: string | null; merged: boolean; mergeCommitSha: string | null };
@@ -84,7 +84,8 @@ async function createRelease(cwd: string, github: GitHubPort, tag: string): Prom
   await github.createRelease(tag, subject, notes);
 }
 
-async function releaseCommit(cwd: string, github: GitHubPort, log: Log, sha: string): Promise<Outcome> {
+// In rollup mode a releasable commit is not tagged here: it hands back its item, and runRelease tags the target once for all of them.
+async function releaseCommit(cwd: string, github: GitHubPort, log: Log, sha: string, rollup: boolean): Promise<Outcome | RollupItem> {
   // Step 1: a tag with its Release is done; a tag without one (step 6 failed earlier) only needs step 6.
   const [existing] = await versionTagsAt(cwd, sha);
   if (existing) {
@@ -108,6 +109,7 @@ async function releaseCommit(cwd: string, github: GitHubPort, log: Log, sha: str
   }
   const type = check.type as ReleaseType;
   const breaking = isBreaking(check, pull.body);
+  if (rollup) return { pr: pull.number, title: pull.title, type, scope: check.scope, breaking, notes: releaseNotes(pull.body) };
 
   // Step 4: described at this commit, so a tag made earlier in this same run is the base.
   const base = await describeBase(cwd, sha);
@@ -115,7 +117,7 @@ async function releaseCommit(cwd: string, github: GitHubPort, log: Log, sha: str
   const tag = `v${nextVersion(base, type, breaking)}`;
 
   // Steps 5 and 6: the tag reaches the remote before the Release, because `gh release create --verify-tag` refuses a tag it cannot find there.
-  const message = formatTagMessage({ title: pull.title, pr: pull.number, notes: extractWhatsNew(pull.body), type, scope: check.scope, breaking });
+  const message = formatTagMessage({ title: pull.title, pr: pull.number, notes: releaseNotes(pull.body), type, scope: check.scope, breaking });
   await pushTag(cwd, tag, sha, message);
   await createRelease(cwd, github, tag);
   return { sha, action: 'released', version: tag.slice(1) };
@@ -127,8 +129,19 @@ async function releaseCommit(cwd: string, github: GitHubPort, log: Log, sha: str
  * where the operator should hear it), 'skip' resolves to `[]` after an info line (a re-run of a superseded push run, which must end green). Either way
  * nothing is tagged, because a re-run could otherwise tag a commit that was skipped as no-pr out of order. A `target` that is not on `trunk` (a ref
  * resolvable in `cwd`, such as `origin/main`) rejects first, in both modes: a dispatch could otherwise tag a commit that never reached the default branch.
+ *
+ * `mode: 'rollup'` (default `'per-pr'`) cuts one tag on `target` instead, bumped by the largest item, whose message is {@link formatRollupMessage} of every
+ * releasable PR in the range; each of their outcomes is `released` with that one version. A range with nothing releasable cuts no tag and no Release.
  */
-export async function runRelease(o: { cwd: string; target: string; github: GitHubPort; log: Log; onNewer: 'reject' | 'skip'; trunk: string }): Promise<Outcome[]> {
+export async function runRelease(o: {
+  cwd: string;
+  target: string;
+  github: GitHubPort;
+  log: Log;
+  onNewer: 'reject' | 'skip';
+  trunk: string;
+  mode?: 'per-pr' | 'rollup';
+}): Promise<Outcome[]> {
   const { cwd, github, log } = o;
   const target = await git(cwd, ['rev-parse', `${o.target}^{commit}`]);
   if (!(await isAncestor(cwd, target, o.trunk))) throw new Error(`target ${target} is not on ${o.trunk}`);
@@ -149,7 +162,19 @@ export async function runRelease(o: { cwd: string; target: string; github: GitHu
   const range = await git(cwd, ['rev-list', '--first-parent', '--reverse', `${base}..${target}`]);
   const commits = [baseCommit, ...(range ? range.split('\n') : [])];
 
-  const outcomes: Outcome[] = [];
-  for (const sha of commits) outcomes.push(await releaseCommit(cwd, github, log, sha));
-  return outcomes;
+  const rollup = o.mode === 'rollup';
+  const results: { sha: string; result: Outcome | RollupItem }[] = [];
+  for (const sha of commits) results.push({ sha, result: await releaseCommit(cwd, github, log, sha, rollup) });
+  const items = results.flatMap(({ result }) => ('pr' in result ? [result] : []));
+
+  let version: string | undefined;
+  if (items.length) {
+    // RELEASE_TYPES is in rank order, so the first type any item has is the largest bump. `base` was described at the target, which no step above tagged.
+    const type = RELEASE_TYPES.find((t) => items.some((i) => i.type === t)) as ReleaseType;
+    version = nextVersion(base, type, items.some((i) => i.breaking));
+    const tag = `v${version}`;
+    await pushTag(cwd, tag, target, formatRollupMessage(items));
+    await createRelease(cwd, github, tag);
+  }
+  return results.map(({ sha, result }) => ('pr' in result ? { sha, action: 'released', version } : result));
 }
