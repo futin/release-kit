@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runRelease = exports.findRepoRoot = exports.createReleasesReader = exports.writeReleasesJson = exports.readReleasesResult = exports.readReleases = exports.defaultGitPort = exports.releaseNotes = exports.parseVersion = exports.parseTagMessage = exports.nextVersion = exports.isNoneOptOut = exports.isBreaking = exports.formatTagMessage = exports.extractWhatsNew = exports.checkTitle = exports.checkNotes = void 0;
+exports.runRelease = exports.findRepoRoot = exports.createReleasesReader = exports.writeReleasesJson = exports.readReleasesResult = exports.readReleases = exports.defaultGitPort = exports.releaseNotes = exports.parseVersion = exports.parseTagMessage = exports.nextVersion = exports.isNoneOptOut = exports.isBreaking = exports.formatTagMessage = exports.formatRollupMessage = exports.extractWhatsNew = exports.checkTitle = exports.checkNotes = void 0;
 var conventional_js_1 = require("./conventional.js");
 Object.defineProperty(exports, "checkNotes", { enumerable: true, get: function () { return conventional_js_1.checkNotes; } });
 Object.defineProperty(exports, "checkTitle", { enumerable: true, get: function () { return conventional_js_1.checkTitle; } });
 Object.defineProperty(exports, "extractWhatsNew", { enumerable: true, get: function () { return conventional_js_1.extractWhatsNew; } });
+Object.defineProperty(exports, "formatRollupMessage", { enumerable: true, get: function () { return conventional_js_1.formatRollupMessage; } });
 Object.defineProperty(exports, "formatTagMessage", { enumerable: true, get: function () { return conventional_js_1.formatTagMessage; } });
 Object.defineProperty(exports, "isBreaking", { enumerable: true, get: function () { return conventional_js_1.isBreaking; } });
 Object.defineProperty(exports, "isNoneOptOut", { enumerable: true, get: function () { return conventional_js_1.isNoneOptOut; } });

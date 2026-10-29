@@ -90,8 +90,92 @@ export function formatTagMessage(r) {
         trailers.push('Release-Breaking: true');
     return `${r.title} (#${r.pr})\n\n${r.notes ? `${r.notes}\n\n` : ''}${trailers.join('\n')}\n`;
 }
+const cap = (scope) => scope.charAt(0).toUpperCase() + scope.slice(1);
+const heading = (scope) => `### ${scope ? cap(scope) : 'Other'}`;
+const marker = (pr) => ` (#${pr})`;
+const PREFIX = /^[a-z]+(?:\([^)]*\))?!?: /;
+// A line-ending `(#N)` for the item's own PR is stripped from every line: the reader ends an item at the first line ending its marker, so one left
+// mid-notes would cut the item short, and one left on the last line would double the marker the formatter appends.
+function withoutOwnMarker(pr, s) {
+    const own = new RegExp(`(?:(?:^|[ \\t]+)\\(#${pr}\\))+[ \\t]*$`);
+    return lf(s).split('\n').map((l) => l.replace(own, '')).join('\n').trim();
+}
+/**
+ * The annotated-tag message of a rollup release: many PRs, oldest first, under one tag (plan §Wire format). The body groups items by scope under `###`
+ * headings, so the tag must be written with `--cleanup=verbatim` or git strips them as comments. The trailer block never carries `Release-PR` or
+ * `Release-Scope`, which is what makes a v1.3.0 reader show the rollup as one release with the grouped body as its notes.
+ */
+export function formatRollupMessage(items) {
+    if (items.length === 0)
+        throw new Error('a rollup needs at least one item');
+    const scopes = [...new Set(items.flatMap((i) => (i.scope ? [i.scope] : [])))];
+    const groups = [...scopes, undefined].map((s) => items.filter((i) => i.scope === s)).filter((g) => g.length > 0);
+    const n = items.length;
+    const count = `${n} ${n === 1 ? 'change' : 'changes'}`;
+    const subject = scopes.length ? `${scopes.map(cap).join(', ')} — ${count}` : count;
+    const entries = [];
+    const body = groups.map((g) => {
+        const texts = g.map((i) => {
+            const notes = withoutOwnMarker(i.pr, i.notes);
+            entries.push(`${notes ? '' : '~'}${i.pr}:${i.type}${i.breaking ? '!' : ''}${i.scope ? `:${i.scope}` : ''}`);
+            return `${notes || withoutOwnMarker(i.pr, i.title.replace(PREFIX, ''))}${marker(i.pr)}`;
+        });
+        return [heading(g[0].scope), ...texts].join('\n\n');
+    });
+    // RELEASE_TYPES is in rank order, so the first type any item has is the highest; breaking only adds its own trailer.
+    const trailers = [`Release-Type: ${RELEASE_TYPES.find((t) => items.some((i) => i.type === t))}`];
+    if (items.some((i) => i.breaking))
+        trailers.push('Release-Breaking: true');
+    trailers.push(`Release-Items: ${entries.join(', ')}`);
+    return `${subject}\n\n${body.join('\n\n')}\n\n${trailers.join('\n')}\n`;
+}
 const TRAILER = /^([A-Za-z][A-Za-z0-9-]*): (.*)$/;
-/** Inverse of {@link formatTagMessage}. A message without a `Release-Type` trailer block (the baseline tag) parses as type `baseline`. */
+const ITEM_ENTRY = /^(~)?(\d+):(feat|fix|perf)(!)?(?::([a-z0-9-]+))?$/;
+// Walks a rollup body back into its items. Group headings sit only where the scope changes between consecutive `Release-Items` entries, so the reader
+// skips exactly those lines and an item's own `###` heading stays in its notes. An item ends at the first line ending its own marker, which the
+// formatter stripped from everywhere else in the item. A malformed entry yields no items; a missing marker stops the walk with the items found so far.
+function parseRollupItems(list, body) {
+    const entries = list.split(',').map((e) => ITEM_ENTRY.exec(e.trim()));
+    if (entries.some((m) => !m))
+        return [];
+    const items = [];
+    let at = 0;
+    const skipBlank = () => {
+        while (at < body.length && body[at].trim() === '')
+            at++;
+    };
+    let prevScope = null;
+    for (const m of entries) {
+        const [, titleOnly, pr, type, bang, scope] = m;
+        if (scope !== prevScope) {
+            skipBlank();
+            if (body[at]?.trimEnd() === heading(scope))
+                at++;
+            prevScope = scope;
+        }
+        skipBlank();
+        const end = marker(Number(pr));
+        const start = at;
+        while (at < body.length && !body[at].trimEnd().endsWith(end))
+            at++;
+        if (at === body.length)
+            break;
+        const last = body[at].trimEnd();
+        const text = [...body.slice(start, at), last.slice(0, -end.length)].join('\n').trim();
+        at++;
+        const item = { pr: Number(pr), type: type, breaking: bang === '!', notes: titleOnly ? '' : text };
+        if (scope)
+            item.scope = scope;
+        if (titleOnly)
+            item.title = text;
+        items.push(item);
+    }
+    return items;
+}
+/**
+ * Inverse of {@link formatTagMessage} and {@link formatRollupMessage}. A message without a `Release-Type` trailer block (the baseline tag) parses as type
+ * `baseline`. `title` and `notes` are the subject and pre-trailer body for every kind of tag; `items` is parsed in addition.
+ */
 export function parseTagMessage(msg) {
     const lines = lf(msg).trimEnd().split('\n');
     const subject = lines[0] ?? '';
@@ -108,7 +192,7 @@ export function parseTagMessage(msg) {
     }
     const type = trailers.get('Release-Type');
     if (last.length === 0 || trailers.size !== last.length || !type || !RELEASE_TYPES.includes(type)) {
-        return { subject, title, type: 'baseline', breaking: false, notes: body.join('\n').trim() };
+        return { subject, title, type: 'baseline', breaking: false, notes: body.join('\n').trim(), items: [] };
     }
     const pr = trailers.get('Release-PR');
     const out = {
@@ -117,11 +201,22 @@ export function parseTagMessage(msg) {
         type: type,
         breaking: trailers.get('Release-Breaking') === 'true',
         notes: body.slice(0, Math.max(blank, 0)).join('\n').trim(),
+        items: [],
     };
     const scope = trailers.get('Release-Scope');
     if (scope)
         out.scope = scope;
     if (pr && /^\d+$/.test(pr))
         out.pr = Number(pr);
+    const list = trailers.get('Release-Items');
+    if (list !== undefined) {
+        out.items = parseRollupItems(list, body.slice(0, Math.max(blank, 0)));
+    }
+    else if (out.pr !== undefined) {
+        const item = { pr: out.pr, type: out.type, breaking: out.breaking, title, notes: out.notes };
+        if (scope)
+            item.scope = scope;
+        out.items = [item];
+    }
     return out;
 }

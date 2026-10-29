@@ -1,5 +1,5 @@
-export { checkNotes, checkTitle, extractWhatsNew, formatTagMessage, isBreaking, isNoneOptOut, nextVersion, parseTagMessage, parseVersion, releaseNotes } from './conventional.js';
-export type { ParsedTag, ReleaseType, TagFields, TitleCheck } from './conventional.js';
+export { checkNotes, checkTitle, extractWhatsNew, formatRollupMessage, formatTagMessage, isBreaking, isNoneOptOut, nextVersion, parseTagMessage, parseVersion, releaseNotes } from './conventional.js';
+export type { ParsedItem, ParsedTag, ReleaseType, RollupItem, TagFields, TitleCheck } from './conventional.js';
 export { defaultGitPort } from './git.js';
 export type { GitPort } from './git.js';
 export { readReleases, readReleasesResult, writeReleasesJson } from './read-releases.js';

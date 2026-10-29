@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { checkNotes, checkTitle, extractWhatsNew, formatTagMessage, isBreaking, isNoneOptOut, nextVersion, parseTagMessage, parseVersion, releaseNotes } from '../src/index.js';
+import { checkNotes, checkTitle, extractWhatsNew, formatRollupMessage, formatTagMessage, isBreaking, isNoneOptOut, nextVersion, parseTagMessage, parseVersion, releaseNotes } from '../src/index.js';
+import type { ParsedTag, ReleaseType, RollupItem } from '../src/index.js';
 
 const bump = (base: string, type: 'feat' | 'fix' | 'perf', breaking: boolean) => nextVersion(base, type, breaking);
 
@@ -101,12 +102,29 @@ test('extractWhatsNew: trailing whitespace on the heading is ignored', () => {
 
 test('formatTagMessage/parseTagMessage round-trip: scoped breaking feat with notes', () => {
   const r = { title: 'feat(hub): add widgets', pr: 42, notes: 'Widgets show up in the hub.\n\n### Detail\nmore', type: 'feat' as const, scope: 'hub', breaking: true };
-  assert.deepEqual(parseTagMessage(formatTagMessage(r)), { subject: 'feat(hub): add widgets (#42)', title: r.title, type: 'feat', scope: 'hub', pr: 42, breaking: true, notes: r.notes });
+  assert.deepEqual(parseTagMessage(formatTagMessage(r)), {
+    subject: 'feat(hub): add widgets (#42)',
+    title: r.title,
+    type: 'feat',
+    scope: 'hub',
+    pr: 42,
+    breaking: true,
+    notes: r.notes,
+    items: [{ pr: 42, type: 'feat', scope: 'hub', breaking: true, title: r.title, notes: r.notes }],
+  });
 });
 
 test('formatTagMessage/parseTagMessage round-trip: fix with empty notes', () => {
   const r = { title: 'fix: stop the crash', pr: 7, notes: '', type: 'fix' as const, breaking: false };
-  assert.deepEqual(parseTagMessage(formatTagMessage(r)), { subject: 'fix: stop the crash (#7)', title: r.title, type: 'fix', pr: 7, breaking: false, notes: '' });
+  assert.deepEqual(parseTagMessage(formatTagMessage(r)), {
+    subject: 'fix: stop the crash (#7)',
+    title: r.title,
+    type: 'fix',
+    pr: 7,
+    breaking: false,
+    notes: '',
+    items: [{ pr: 7, type: 'fix', breaking: false, title: r.title, notes: '' }],
+  });
 });
 
 test('formatTagMessage/parseTagMessage round-trip: notes ending in a Key: value line', () => {
@@ -135,6 +153,7 @@ test('parseTagMessage: a baseline tag has no trailers', () => {
     type: 'baseline',
     breaking: false,
     notes: '',
+    items: [],
   });
 });
 
@@ -145,6 +164,172 @@ test('parseTagMessage: a last paragraph with a non-trailer line is not trailers'
 
 test('parseTagMessage: a trailer block without Release-Type is not trailers', () => {
   assert.equal(parseTagMessage('fix: x (#1)\n\nRelease-PR: 1\n').type, 'baseline');
+});
+
+// The rollup fixture from the batched-releases plan, oldest first: two kaizen items (one title-only and breaking), a routines fix, an unscoped perf.
+const fx: RollupItem[] = [
+  { pr: 336, title: 'feat(kaizen): verdict badges', type: 'feat', scope: 'kaizen', breaking: false, notes: '- Lessons show a verdict badge.' },
+  { pr: 337, title: 'feat(kaizen)!: drop legacy log', type: 'feat', scope: 'kaizen', breaking: true, notes: '' },
+  { pr: 320, title: 'fix(routines): show run length', type: 'fix', scope: 'routines', breaking: false, notes: 'Timeouts show how long a run lasted.' },
+  { pr: 341, title: 'perf: faster scan', type: 'perf', breaking: false, notes: 'Faster scan.' },
+];
+const fxBody = [
+  '### Kaizen',
+  '',
+  '- Lessons show a verdict badge. (#336)',
+  '',
+  'drop legacy log (#337)',
+  '',
+  '### Routines',
+  '',
+  'Timeouts show how long a run lasted. (#320)',
+  '',
+  '### Other',
+  '',
+  'Faster scan. (#341)',
+].join('\n');
+const fxItems = [
+  { pr: 336, type: 'feat', scope: 'kaizen', breaking: false, notes: '- Lessons show a verdict badge.' },
+  { pr: 337, type: 'feat', scope: 'kaizen', breaking: true, title: 'drop legacy log', notes: '' },
+  { pr: 320, type: 'fix', scope: 'routines', breaking: false, notes: 'Timeouts show how long a run lasted.' },
+  { pr: 341, type: 'perf', breaking: false, notes: 'Faster scan.' },
+];
+const item = (pr: number, type: ReleaseType, scope: string | undefined, notes: string, breaking = false): RollupItem => ({
+  pr,
+  title: `${type}${scope ? `(${scope})` : ''}${breaking ? '!' : ''}: item ${pr}`,
+  type,
+  ...(scope ? { scope } : {}),
+  breaking,
+  notes,
+});
+
+test('formatRollupMessage: subject, scope groups in first-appearance order with Other last, and the trailer block', () => {
+  assert.equal(
+    formatRollupMessage(fx),
+    `Kaizen, Routines — 4 changes\n\n${fxBody}\n\nRelease-Type: feat\nRelease-Breaking: true\nRelease-Items: 336:feat:kaizen, ~337:feat!:kaizen, 320:fix:routines, 341:perf\n`,
+  );
+});
+
+test('formatRollupMessage: the trailer block carries no Release-PR or Release-Scope and repeats no key', () => {
+  const msg = formatRollupMessage(fx);
+  const trailers = msg.trimEnd().split('\n\n').at(-1)!.split('\n');
+  assert.deepEqual(trailers.map((l) => l.split(': ')[0]), ['Release-Type', 'Release-Breaking', 'Release-Items']);
+});
+
+test('formatRollupMessage: one item is "1 change", all unscoped is "N changes"', () => {
+  assert.match(formatRollupMessage([item(1, 'feat', 'kaizen', 'A.')]), /^Kaizen — 1 change\n/);
+  assert.match(formatRollupMessage([item(1, 'fix', undefined, 'A.'), item(2, 'perf', undefined, 'B.')]), /^2 changes\n\n### Other\n/);
+});
+
+test('formatRollupMessage: Release-Type ranks feat > fix > perf whatever the order; breaking never changes it', () => {
+  const type = (items: RollupItem[]) => /^Release-Type: (.+)$/m.exec(formatRollupMessage(items))![1];
+  assert.equal(type([item(1, 'fix', undefined, 'A.'), item(2, 'perf', undefined, 'B.')]), 'fix');
+  assert.equal(type([item(1, 'perf', undefined, 'A.'), item(2, 'fix', undefined, 'B.')]), 'fix');
+  assert.equal(type([item(1, 'perf', undefined, 'A.'), item(2, 'feat', undefined, 'B.')]), 'feat');
+  const breakingPerf = formatRollupMessage([item(1, 'fix', undefined, 'A.'), item(2, 'perf', undefined, 'B.', true)]);
+  assert.equal(type([item(1, 'fix', undefined, 'A.'), item(2, 'perf', undefined, 'B.', true)]), 'fix');
+  assert.match(breakingPerf, /^Release-Breaking: true$/m);
+  assert.doesNotMatch(formatRollupMessage([item(1, 'fix', undefined, 'A.')]), /Release-Breaking/);
+});
+
+test('formatRollupMessage: interleaved scopes are grouped, and Release-Items follows body order', () => {
+  const msg = formatRollupMessage([item(1, 'feat', 'kaizen', 'A.'), item(2, 'fix', 'routines', 'B.'), item(3, 'fix', 'kaizen', 'C.')]);
+  assert.match(msg, /^Kaizen, Routines — 3 changes\n\n### Kaizen\n\nA\. \(#1\)\n\nC\. \(#3\)\n\n### Routines\n\nB\. \(#2\)\n\n/);
+  assert.match(msg, /^Release-Items: 1:feat:kaizen, 3:fix:kaizen, 2:fix:routines$/m);
+  assert.deepEqual(parseTagMessage(msg).items.map((i) => i.pr), [1, 3, 2]);
+});
+
+test('formatRollupMessage/parseTagMessage round-trip: the release keeps subject and body, items come back in order', () => {
+  const p = parseTagMessage(formatRollupMessage(fx));
+  assert.equal(p.type, 'feat');
+  assert.equal(p.breaking, true);
+  assert.equal(p.pr, undefined);
+  assert.equal(p.scope, undefined);
+  assert.equal(p.subject, 'Kaizen, Routines — 4 changes');
+  assert.equal(p.title, 'Kaizen, Routines — 4 changes');
+  assert.equal(p.notes, fxBody);
+  assert.deepEqual(p.items, fxItems);
+});
+
+test('parseTagMessage: a scope named t round-trips as a scope with its notes, not as a title-only item', () => {
+  const p = parseTagMessage(formatRollupMessage([{ pr: 5, title: 'feat(t): x', type: 'feat', scope: 't', breaking: false, notes: 'T notes.' }]));
+  assert.deepEqual(p.items, [{ pr: 5, type: 'feat', scope: 't', breaking: false, notes: 'T notes.' }]);
+});
+
+test('formatRollupMessage: notes already ending in the item\'s own (#N) carry the marker once, and later items still parse', () => {
+  const items = [{ ...fx[0], notes: '- Lessons show a verdict badge. (#336)' }, ...fx.slice(1)];
+  const msg = formatRollupMessage(items);
+  assert.match(msg, /^- Lessons show a verdict badge\. \(#336\)$/m);
+  assert.doesNotMatch(msg, /\(#336\) \(#336\)/);
+  assert.deepEqual(parseTagMessage(msg).items, fxItems);
+});
+
+test('formatRollupMessage: the item\'s own (#N) mid-notes is stripped from every line, so it cannot end the item early', () => {
+  const items = [{ ...fx[0], notes: 'see (#336)\nmore' }, ...fx.slice(1)];
+  const msg = formatRollupMessage(items);
+  assert.match(msg, /^### Kaizen\n\nsee\nmore \(#336\)\n\ndrop legacy log \(#337\)$/m);
+  assert.deepEqual(parseTagMessage(msg).items, [{ ...fxItems[0], notes: 'see\nmore' }, ...fxItems.slice(1)]);
+});
+
+test('parseTagMessage: notes holding their own ### heading and another PR\'s (#123) line leave the items unchanged (Review Focus 3)', () => {
+  const notes = '### Sub\n\nsee (#123)\nlast line';
+  const items = [{ ...fx[0], notes }, ...fx.slice(1)];
+  assert.deepEqual(parseTagMessage(formatRollupMessage(items)).items, [{ ...fxItems[0], notes }, ...fxItems.slice(1)]);
+  // The same notes as the first item of a group, whose heading the reader skips: the item's own heading must survive.
+  const later = [fx[0], fx[1], { ...fx[2], notes }, fx[3]];
+  assert.deepEqual(parseTagMessage(formatRollupMessage(later)).items, [fxItems[0], fxItems[1], { ...fxItems[2], notes }, fxItems[3]]);
+});
+
+test('parseTagMessage: a CRLF rollup message parses the same as LF', () => {
+  const msg = formatRollupMessage(fx);
+  assert.deepEqual(parseTagMessage(msg.replace(/\n/g, '\r\n')), parseTagMessage(msg));
+});
+
+test('parseTagMessage: a per-PR tag with a Release-Type but no Release-PR has no items', () => {
+  assert.deepEqual(parseTagMessage('fix: x\n\nRelease-Type: fix\n').items, []);
+});
+
+// parseTagMessage as v1.3.0 shipped it (commit 926e12d): the reader every consumer pinned to v1.3.0 runs over the first rollup tag it meets.
+const RELEASE_TYPES_V130: readonly string[] = ['feat', 'fix', 'perf'];
+const TRAILER_V130 = /^([A-Za-z][A-Za-z0-9-]*): (.*)$/;
+function parseV130(msg: string): Omit<ParsedTag, 'items'> {
+  const lines = msg.replace(/\r\n/g, '\n').trimEnd().split('\n');
+  const subject = lines[0] ?? '';
+  const title = subject.replace(/ \(#\d+\)$/, '');
+  const body = lines.slice(1);
+  const blank = body.lastIndexOf('');
+  const last = body.slice(blank + 1);
+  const trailers = new Map<string, string>();
+  for (const l of last) {
+    const m = TRAILER_V130.exec(l);
+    if (m) trailers.set(m[1], m[2]);
+  }
+  const type = trailers.get('Release-Type');
+  if (last.length === 0 || trailers.size !== last.length || !type || !RELEASE_TYPES_V130.includes(type)) {
+    return { subject, title, type: 'baseline', breaking: false, notes: body.join('\n').trim() };
+  }
+  const pr = trailers.get('Release-PR');
+  const out: Omit<ParsedTag, 'items'> = {
+    subject,
+    title,
+    type: type as ReleaseType,
+    breaking: trailers.get('Release-Breaking') === 'true',
+    notes: body.slice(0, Math.max(blank, 0)).join('\n').trim(),
+  };
+  const scope = trailers.get('Release-Scope');
+  if (scope) out.scope = scope;
+  if (pr && /^\d+$/.test(pr)) out.pr = Number(pr);
+  return out;
+}
+
+test('a v1.3.0 reader over a rollup tag sees a release, not a baseline, with no PR or scope and the grouped body as notes (Review Focus 4)', () => {
+  const p = parseV130(formatRollupMessage(fx));
+  assert.equal(p.type, 'feat');
+  assert.equal(p.breaking, true);
+  assert.equal(p.pr, undefined);
+  assert.equal(p.scope, undefined);
+  assert.equal(p.title, 'Kaizen, Routines — 4 changes');
+  assert.equal(p.notes, fxBody);
 });
 
 test('isNoneOptOut: true for None in any case, with or without a dash reason, and surrounding whitespace', () => {
