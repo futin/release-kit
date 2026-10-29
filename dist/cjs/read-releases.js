@@ -39,7 +39,8 @@ async function readReleasesResult(repoRoot, opts = {}) {
             return { value: EMPTY(), complete: true };
         const releases = tags.map((t) => {
             const p = (0, conventional_js_1.parseTagMessage)(t.message);
-            const r = { version: t.name.slice(1), date: t.date, title: p.title, type: p.type, breaking: p.breaking, notes: p.notes };
+            const items = p.items.map((i) => (base ? { ...i, url: `${base}/pull/${i.pr}` } : { ...i }));
+            const r = { version: t.name.slice(1), date: t.date, title: p.title, type: p.type, breaking: p.breaking, notes: p.notes, items };
             if (p.scope)
                 r.scope = p.scope;
             if (p.pr !== undefined) {

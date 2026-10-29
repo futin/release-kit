@@ -1,9 +1,12 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseTagMessage } from './conventional.js';
-import type { ReleaseType } from './conventional.js';
+import type { ParsedItem, ReleaseType } from './conventional.js';
 import { DESCRIBE_FILTER, defaultGitPort, versionTagsVia } from './git.js';
 import type { GitPort } from './git.js';
+
+/** One PR's change inside a release; `url` is its PR page when the origin is GitHub. */
+export type ReleaseItem = ParsedItem & { url?: string };
 
 export type Release = {
   version: string;
@@ -15,6 +18,8 @@ export type Release = {
   breaking: boolean;
   notes: string;
   url?: string;
+  /** Empty for a baseline, one for a per-PR tag, one per PR for a rollup tag. */
+  items: ReleaseItem[];
 };
 
 export type ReleasesResponse = { current: { version: string; ahead: number } | null; releases: Release[] };
@@ -59,7 +64,8 @@ export async function readReleasesResult(repoRoot: string, opts: ReadOptions = {
     if (!tags.length) return { value: EMPTY(), complete: true };
     const releases = tags.map((t): Release => {
       const p = parseTagMessage(t.message);
-      const r: Release = { version: t.name.slice(1), date: t.date, title: p.title, type: p.type, breaking: p.breaking, notes: p.notes };
+      const items = p.items.map((i): ReleaseItem => (base ? { ...i, url: `${base}/pull/${i.pr}` } : { ...i }));
+      const r: Release = { version: t.name.slice(1), date: t.date, title: p.title, type: p.type, breaking: p.breaking, notes: p.notes, items };
       if (p.scope) r.scope = p.scope;
       if (p.pr !== undefined) {
         r.pr = p.pr;

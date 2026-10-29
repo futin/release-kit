@@ -5,8 +5,8 @@ import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defaultGitPort, formatTagMessage, readReleases, readReleasesResult, writeReleasesJson } from '../src/index.js';
-import type { GitPort } from '../src/index.js';
+import { defaultGitPort, formatRollupMessage, formatTagMessage, readReleases, readReleasesResult, writeReleasesJson } from '../src/index.js';
+import type { GitPort, RollupItem } from '../src/index.js';
 import { DESCRIBE_FILTER, TAG_FORMAT, git, versionTags, versionTagsAt } from '../src/git.js';
 import { makeRepo } from './fixtures/repo.js';
 
@@ -382,5 +382,76 @@ test('the default port kills a hung git at timeoutMs and reads as empty, incompl
     process.env.PATH = path;
     r.cleanup();
     rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+const ROLLUP: RollupItem[] = [
+  { pr: 336, title: 'feat(kaizen): verdict badges', type: 'feat', scope: 'kaizen', breaking: false, notes: '- Lessons show a verdict badge.' },
+  { pr: 337, title: 'feat(kaizen)!: drop legacy log', type: 'feat', scope: 'kaizen', breaking: true, notes: '' },
+  { pr: 320, title: 'fix(routines): show run length', type: 'fix', scope: 'routines', breaking: false, notes: 'Timeouts show how long a run lasted.' },
+  { pr: 341, title: 'perf: faster scan', type: 'perf', breaking: false, notes: 'Faster scan.' },
+];
+
+function itemsRepo() {
+  const r = makeRepo();
+  r.tag('v0.1.0', r.commit('base'), BASELINE);
+  r.tag('v0.2.0', r.commit('a'), formatTagMessage({ title: 'feat(hub): add a thing', pr: 7, notes: 'It adds a thing.', type: 'feat', scope: 'hub', breaking: false }));
+  r.tag('v0.3.0', r.commit('b'), formatTagMessage({ title: 'fix: mend it', pr: 8, notes: '', type: 'fix', breaking: false }));
+  r.tag('v0.4.0', r.commit('c'), formatRollupMessage(ROLLUP));
+  return r;
+}
+
+test('items: a baseline has none, a per-PR release has one equal to its release-level fields, with a url', async () => {
+  const r = itemsRepo();
+  try {
+    r.setOrigin('git@github.com:futin/x.git');
+    const rels = (await readReleases(r.dir)).releases;
+    const by = (v: string) => rels.find((x) => x.version === v)!;
+    assert.deepEqual(by('0.1.0').items, []);
+    for (const v of ['0.2.0', '0.3.0']) {
+      const rel = by(v);
+      assert.equal(rel.items.length, 1);
+      const [it] = rel.items;
+      assert.equal(it.pr, rel.pr);
+      assert.equal(it.type, rel.type);
+      assert.equal(it.scope, rel.scope);
+      assert.equal(it.breaking, rel.breaking);
+      assert.equal(it.title, rel.title);
+      assert.equal(it.notes, rel.notes);
+      assert.equal(it.url, rel.url);
+      assert.equal(it.url, `https://github.com/futin/x/pull/${rel.pr}`);
+    }
+  } finally {
+    r.cleanup();
+  }
+});
+
+test('items: a rollup release lists every item with its own url and has no release-level pr or url', async () => {
+  const r = itemsRepo();
+  try {
+    r.setOrigin('https://github.com/futin/x');
+    const rel = (await readReleases(r.dir)).releases.find((x) => x.version === '0.4.0')!;
+    assert.equal(rel.items.length, 4);
+    assert.deepEqual(rel.items.map((i) => i.pr), [336, 337, 320, 341]);
+    for (const i of rel.items) assert.equal(i.url, `https://github.com/futin/x/pull/${i.pr}`);
+    assert.equal('pr' in rel, false);
+    assert.equal('url' in rel, false);
+    assert.equal('scope' in rel, false);
+    assert.equal(rel.items[1].breaking, true);
+    assert.equal(rel.items[1].title, 'drop legacy log');
+  } finally {
+    r.cleanup();
+  }
+});
+
+test('items: with no GitHub origin no item carries a url', async () => {
+  const r = itemsRepo();
+  try {
+    for (const rel of (await readReleases(r.dir)).releases) {
+      assert.equal('url' in rel, false);
+      for (const i of rel.items) assert.equal('url' in i, false);
+    }
+  } finally {
+    r.cleanup();
   }
 });
