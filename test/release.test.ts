@@ -16,12 +16,13 @@ type Fake = {
   portCalls: number;
   pullCalls: string[];
   getPullCalls: number[];
+  releases: Set<string>;
 };
 
 // An in-memory GitHub: `pulls` answers pullsForCommit by sha, `byNumber` answers getPull, and createRelease makes releaseExists true so a second run sees it.
 function fake(o: { pulls?: Record<string, PullRequest[]>; byNumber?: Record<number, PullRequest>; releases?: string[] } = {}): Fake {
   const releases = new Set(o.releases ?? []);
-  const f: Fake = { port: undefined as unknown as GitHubPort, created: [], warnings: [], infos: [], portCalls: 0, pullCalls: [], getPullCalls: [] };
+  const f: Fake = { port: undefined as unknown as GitHubPort, created: [], warnings: [], infos: [], portCalls: 0, pullCalls: [], getPullCalls: [], releases };
   f.port = {
     async pullsForCommit(sha) {
       f.portCalls++;
@@ -74,6 +75,8 @@ async function withRepo(fn: (r: TestRepo) => Promise<void>): Promise<void> {
 
 const run = (r: TestRepo, f: Fake, target: string, onNewer: 'reject' | 'skip', trunk = 'main') =>
   runRelease({ cwd: r.dir, target, github: f.port, log: log(f), onNewer, trunk });
+
+const rollup = (r: TestRepo, f: Fake, target: string) => runRelease({ cwd: r.dir, target, github: f.port, log: log(f), onNewer: 'reject', trunk: 'main', mode: 'rollup' });
 
 test('no baseline tag reachable: nothing released, one warning, no tag pushed', async () => {
   await withRepo(async (r) => {
@@ -393,5 +396,156 @@ test('a per-PR release whose What\'s new is None writes a tag message with no no
     assert.deepEqual((await run(r, f, a, 'reject'))[1], { sha: a, action: 'released', version: '0.1.1' });
     assert.equal(await originMessage(r, 'v0.1.1'), 'fix(api): tidy (#5)\n\nRelease-Type: fix\nRelease-Scope: api\nRelease-PR: 5');
     assert.deepEqual(f.created, [{ tag: 'v0.1.1', title: 'fix(api): tidy (#5)', notes: '' }]);
+  });
+});
+
+test('rollup: one tag on the target for every releasable PR in the range, one Release, the silent PR left out', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.5.0', base, BASELINE);
+    const a = r.commit('fix(routines): a (#1)');
+    const b = r.commit('docs: b (#2)');
+    const c = r.commit('feat(kaizen): c (#3)');
+    const f = fake({
+      releases: ['v0.5.0'],
+      pulls: {
+        [a]: [pr(1, 'fix(routines): a', a, "## What's new\n\nA got fixed.")],
+        [b]: [pr(2, 'docs: b', b)],
+        [c]: [pr(3, 'feat(kaizen): c', c, "## What's new\n\nNone")],
+      },
+    });
+    assert.deepEqual(await rollup(r, f, c), [
+      { sha: base, action: 'already-released' },
+      { sha: a, action: 'released', version: '0.6.0' },
+      { sha: b, action: 'not-releasing' },
+      { sha: c, action: 'released', version: '0.6.0' },
+    ]);
+    assert.deepEqual(await originTags(r), ['v0.6.0']);
+    assert.equal(await git(r.origin!, ['rev-parse', 'v0.6.0^{commit}']), c);
+    const message = await originMessage(r, 'v0.6.0');
+    // A `None` opt-out is title-only, and the `### ` headings survive the trip through git.
+    assert.equal(
+      message,
+      'Routines, Kaizen — 2 changes\n\n### Routines\n\nA got fixed. (#1)\n\n### Kaizen\n\nc (#3)\n\nRelease-Type: feat\nRelease-Items: 1:fix:routines, ~3:feat:kaizen',
+    );
+    assert.deepEqual(f.created, [
+      { tag: 'v0.6.0', title: 'Routines, Kaizen — 2 changes', notes: '### Routines\n\nA got fixed. (#1)\n\n### Kaizen\n\nc (#3)' },
+    ]);
+  });
+});
+
+test('rollup: a silent target still carries the tag, bumped by the releasable PR before it', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.5.0', base, BASELINE);
+    const a = r.commit('fix: a (#1)');
+    const d = r.commit('docs: d (#2)');
+    const f = fake({ releases: ['v0.5.0'], pulls: { [a]: [pr(1, 'fix: a', a)], [d]: [pr(2, 'docs: d', d)] } });
+    assert.deepEqual(await rollup(r, f, d), [
+      { sha: base, action: 'already-released' },
+      { sha: a, action: 'released', version: '0.5.1' },
+      { sha: d, action: 'not-releasing' },
+    ]);
+    assert.deepEqual(await originTags(r), ['v0.5.1']);
+    assert.equal(await git(r.origin!, ['rev-parse', 'v0.5.1^{commit}']), d);
+    assert.equal(f.created.length, 1);
+  });
+});
+
+test('rollup: a range of only docs and chore PRs cuts no tag and no Release, and does not throw', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.5.0', base, BASELINE);
+    const a = r.commit('docs: a (#1)');
+    const b = r.commit('chore: b (#2)');
+    const f = fake({ releases: ['v0.5.0'], pulls: { [a]: [pr(1, 'docs: a', a)], [b]: [pr(2, 'chore: b', b)] } });
+    assert.deepEqual(await rollup(r, f, b), [
+      { sha: base, action: 'already-released' },
+      { sha: a, action: 'not-releasing' },
+      { sha: b, action: 'not-releasing' },
+    ]);
+    assert.deepEqual(await originTags(r), []);
+    assert.deepEqual(f.created, []);
+  });
+});
+
+test('rollup: a target with nothing after the baseline cuts nothing', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.5.0', base, BASELINE);
+    const f = fake({ releases: ['v0.5.0'] });
+    assert.deepEqual(await rollup(r, f, base), [{ sha: base, action: 'already-released' }]);
+    assert.deepEqual(await originTags(r), []);
+    assert.deepEqual(f.created, []);
+  });
+});
+
+test('rollup: a second run over the same target creates nothing; with its Release deleted it repairs it and still has one tag', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.5.0', base, BASELINE);
+    const a = r.commit('fix: a (#1)');
+    const c = r.commit('feat: c (#3)');
+    const f = fake({ releases: ['v0.5.0'], pulls: { [a]: [pr(1, 'fix: a', a)], [c]: [pr(3, 'feat: c', c)] } });
+    await rollup(r, f, c);
+    assert.deepEqual(await originTags(r), ['v0.6.0']);
+    assert.equal(f.created.length, 1);
+
+    assert.deepEqual(await rollup(r, f, c), [{ sha: c, action: 'already-released' }]);
+    assert.deepEqual(await originTags(r), ['v0.6.0']);
+    assert.equal(f.created.length, 1);
+
+    f.releases.delete('v0.6.0');
+    assert.deepEqual(await rollup(r, f, c), [{ sha: c, action: 'release-repaired', version: '0.6.0' }]);
+    assert.deepEqual(await originTags(r), ['v0.6.0']);
+    assert.equal(f.created.length, 2);
+    assert.deepEqual(f.created[1], f.created[0]);
+  });
+});
+
+test('rollup: a breaking fix with a feat bumps the minor at major 0, with Release-Breaking: true', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.5.0', base, BASELINE);
+    const a = r.commit('fix!: a (#1)');
+    const c = r.commit('feat: c (#3)');
+    const f = fake({ releases: ['v0.5.0'], pulls: { [a]: [pr(1, 'fix!: a', a)], [c]: [pr(3, 'feat: c', c)] } });
+    await rollup(r, f, c);
+    assert.deepEqual(await originTags(r), ['v0.6.0']);
+    const message = await originMessage(r, 'v0.6.0');
+    assert.match(message, /^Release-Type: feat\nRelease-Breaking: true\nRelease-Items: ~1:fix!, ~3:feat$/m);
+    assert.doesNotMatch(message, /Release-(PR|Scope):/);
+  });
+});
+
+test('rollup: a breaking fix with a feat bumps the major past 1.x', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v1.2.3', base, BASELINE);
+    const a = r.commit('fix!: a (#1)');
+    const c = r.commit('feat: c (#3)');
+    const f = fake({ releases: ['v1.2.3'], pulls: { [a]: [pr(1, 'fix!: a', a)], [c]: [pr(3, 'feat: c', c)] } });
+    assert.deepEqual((await rollup(r, f, c)).map((o) => o.version), [undefined, '2.0.0', '2.0.0']);
+    assert.deepEqual(await originTags(r), ['v2.0.0']);
+  });
+});
+
+test('rollup: a commit with no PR in the middle warns and the others are still rolled up', async () => {
+  await withRepo(async (r) => {
+    const base = r.commit('chore: baseline');
+    r.tag('v0.5.0', base, BASELINE);
+    const a = r.commit('fix: a (#1)');
+    const direct = r.commit('direct push to main');
+    const c = r.commit('fix: c (#3)');
+    const f = fake({ releases: ['v0.5.0'], pulls: { [a]: [pr(1, 'fix: a', a)], [c]: [pr(3, 'fix: c', c)] } });
+    assert.deepEqual(await rollup(r, f, c), [
+      { sha: base, action: 'already-released' },
+      { sha: a, action: 'released', version: '0.5.1' },
+      { sha: direct, action: 'no-pr' },
+      { sha: c, action: 'released', version: '0.5.1' },
+    ]);
+    assert.deepEqual(f.warnings, [`no PR for ${direct}`]);
+    assert.deepEqual(await originTags(r), ['v0.5.1']);
+    assert.match(await originMessage(r, 'v0.5.1'), /^Release-Items: ~1:fix, ~3:fix$/m);
   });
 });
