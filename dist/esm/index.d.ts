@@ -1,4 +1,4 @@
-export { checkTitle, extractWhatsNew, formatTagMessage, isBreaking, isNoneOptOut, nextVersion, parseTagMessage, parseVersion, releaseNotes } from './conventional.js';
+export { checkNotes, checkTitle, extractWhatsNew, formatTagMessage, isBreaking, isNoneOptOut, nextVersion, parseTagMessage, parseVersion, releaseNotes } from './conventional.js';
 export type { ParsedTag, ReleaseType, TagFields, TitleCheck } from './conventional.js';
 export { defaultGitPort } from './git.js';
 export type { GitPort } from './git.js';

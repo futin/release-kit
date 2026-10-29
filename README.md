@@ -49,7 +49,8 @@ Shared CI and release parts for futin's Node apps: a reusable PR gate (`ci-node.
 
    The job id **must** be `ci` and no job may set `name:`. Optional inputs: `node-version` (default `22`), `install-command` (overrides lockfile
    detection: `pnpm-lock.yaml` → `pnpm install --frozen-lockfile`, `package-lock.json` → `npm ci`, neither → skipped), `skills-command` +
-   `skills-paths` (an extra suite run only when a PR touches those paths), `kit-ref` (keep it equal to the `@` ref in `uses:`).
+   `skills-paths` (an extra suite run only when a PR touches those paths), `kit-ref` (keep it equal to the `@` ref in `uses:`), `require-notes` (see
+   [Adopting the notes check](#adopting-the-notes-check)).
 2. Open a PR with it and get it green.
 3. Read the context names off that PR: `gh pr checks <n>`. They must be exactly `ci / checks`, `ci / pr-title`, `ci / skills`.
 4. Only then apply the settings, dry run first:
@@ -132,6 +133,16 @@ The PR title decides; the version is bumped from the newest `vX.Y.Z` tag reachab
 
 Any other type (`docs`, `chore`, `test`, `refactor`, `ci`, `build`) cuts nothing, and a `BREAKING CHANGE:` line on one of them is ignored. A commit on `main`
 with no PR is skipped with the warning `no PR for <sha>` and does not block the commits after it.
+
+### Adopting the notes check
+
+`require-notes: true` on the `ci-node.yml` call makes the existing `ci / pr-title` check also fail a PR that cuts a release (`feat`, `fix`, `perf`) when its
+`## What's new` section is empty, holds only the template comment, or the PR has no body. Silent types (`docs`, `chore`, …) are never asked for notes. It is
+off by default, so a caller that sets nothing sees no change, and it adds no job, so the ruleset's required contexts stay as they are.
+
+The caller's `ci.yml` must trigger on `edited` (the snippet above already does), or a body fix will not re-run the check. To release a PR without notes,
+write `None` (any case, optionally followed by a dash and a reason, e.g. `None — internal only`) as the section's content: the check passes and the
+release carries no notes paragraph — the `None` is dropped from the tag message and the GitHub Release, never shown to readers.
 
 ### Re-running
 

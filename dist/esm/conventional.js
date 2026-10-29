@@ -68,6 +68,18 @@ export function releaseNotes(body) {
     const notes = extractWhatsNew(body);
     return isNoneOptOut(notes) ? '' : notes;
 }
+/**
+ * The opt-in notes rule: a PR whose title cuts a release (feat|fix|perf) needs a non-empty `## What's new` section, or `None` to opt out. Other types and
+ * titles `checkTitle` already refuses pass here, so a bad title is reported once, by the title check.
+ */
+export function checkNotes(title, body) {
+    const t = checkTitle(title);
+    if (!t.ok || !t.type || !RELEASE_TYPES.includes(t.type))
+        return { ok: true };
+    if (extractWhatsNew(body) !== '')
+        return { ok: true };
+    return { ok: false, reason: `a ${t.type} PR cuts a release and needs a "## What's new" section with notes for the release, or "None" to opt out` };
+}
 /** The annotated-tag message the release workflow writes and the reader parses (spec §Tag message — the contract). */
 export function formatTagMessage(r) {
     const trailers = [`Release-Type: ${r.type}`];

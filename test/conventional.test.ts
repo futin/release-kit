@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { checkTitle, extractWhatsNew, formatTagMessage, isBreaking, isNoneOptOut, nextVersion, parseTagMessage, parseVersion, releaseNotes } from '../src/index.js';
+import { checkNotes, checkTitle, extractWhatsNew, formatTagMessage, isBreaking, isNoneOptOut, nextVersion, parseTagMessage, parseVersion, releaseNotes } from '../src/index.js';
 
 const bump = (base: string, type: 'feat' | 'fix' | 'perf', breaking: boolean) => nextVersion(base, type, breaking);
 
@@ -159,4 +159,25 @@ test('releaseNotes: a None section is empty, real notes pass through unchanged',
   assert.equal(releaseNotes("## What's new\n\nNone — refactor\n\n## Verification\n\nx"), '');
   assert.equal(releaseNotes("## What's new\n\nTabs stop flickering.\n\n### Detail\nmore\n"), "Tabs stop flickering.\n\n### Detail\nmore");
   assert.equal(releaseNotes(null), '');
+});
+
+const withSection = (section: string) => `## Summary\n\nx\n\n## What's new\n\n${section}\n\n## Verification\n\ny`;
+
+test('checkNotes: a releasing PR with an empty section, a comment-only section, or no body is refused naming What\'s new', () => {
+  const template = "<!-- Describe the change for users. -->";
+  for (const body of [withSection(''), withSection(template), `## What's new\n\n${template}\n`, null]) {
+    const r = checkNotes('feat(x): y', body);
+    assert.equal(r.ok, false, JSON.stringify(body));
+    assert.match(r.reason ?? '', /What's new/);
+  }
+});
+
+test('checkNotes: ok with notes, with a None opt-out, on a silent type, and on an invalid title', () => {
+  assert.deepEqual(checkNotes('feat(x): y', withSection('Tabs stop flickering.')), { ok: true });
+  assert.equal(checkNotes('fix: y', withSection('None')).ok, true);
+  assert.equal(checkNotes('perf: y', withSection('None — internal')).ok, true);
+  assert.equal(checkNotes('docs: y', withSection('')).ok, true);
+  assert.equal(checkNotes('chore: y', null).ok, true);
+  assert.equal(checkNotes('chore!: y', withSection('')).ok, true);
+  assert.equal(checkNotes('not a title', null).ok, true);
 });

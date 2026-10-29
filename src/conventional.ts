@@ -79,6 +79,17 @@ export function releaseNotes(body: string | null): string {
   return isNoneOptOut(notes) ? '' : notes;
 }
 
+/**
+ * The opt-in notes rule: a PR whose title cuts a release (feat|fix|perf) needs a non-empty `## What's new` section, or `None` to opt out. Other types and
+ * titles `checkTitle` already refuses pass here, so a bad title is reported once, by the title check.
+ */
+export function checkNotes(title: string, body: string | null): { ok: boolean; reason?: string } {
+  const t = checkTitle(title);
+  if (!t.ok || !t.type || !RELEASE_TYPES.includes(t.type)) return { ok: true };
+  if (extractWhatsNew(body) !== '') return { ok: true };
+  return { ok: false, reason: `a ${t.type} PR cuts a release and needs a "## What's new" section with notes for the release, or "None" to opt out` };
+}
+
 export type TagFields = { title: string; pr: number; notes: string; type: ReleaseType; scope?: string; breaking: boolean };
 export type ParsedTag = { subject: string; title: string; type: ReleaseType | 'baseline'; scope?: string; pr?: number; breaking: boolean; notes: string };
 

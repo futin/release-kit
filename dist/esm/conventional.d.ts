@@ -24,6 +24,14 @@ export declare function extractWhatsNew(body: string | null): string;
 export declare function isNoneOptOut(notes: string): boolean;
 /** The notes a release carries for a PR body: its What's new section, or nothing when the author opted out with `None`. */
 export declare function releaseNotes(body: string | null): string;
+/**
+ * The opt-in notes rule: a PR whose title cuts a release (feat|fix|perf) needs a non-empty `## What's new` section, or `None` to opt out. Other types and
+ * titles `checkTitle` already refuses pass here, so a bad title is reported once, by the title check.
+ */
+export declare function checkNotes(title: string, body: string | null): {
+    ok: boolean;
+    reason?: string;
+};
 export type TagFields = {
     title: string;
     pr: number;

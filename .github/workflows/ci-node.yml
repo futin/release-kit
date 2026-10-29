@@ -31,6 +31,10 @@ on:
         description: The release-kit ref the pr-title checker is taken from; keep it equal to the caller's uses ref.
         type: string
         default: v1
+      require-notes:
+        description: When true, a PR that cuts a release (feat|fix|perf) must have a "## What's new" section, or "None". Trigger CI on `edited` so a body edit re-checks.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -91,9 +95,11 @@ jobs:
           node-version: ${{ inputs.node-version }}
           # v5 defaults this on, and it then looks for the packageManager binary (pnpm) before corepack has installed it.
           package-manager-cache: false
-      - name: Check PR title
+      - name: Check PR title and notes
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REQUIRE_NOTES: ${{ inputs.require-notes }}
         run: node .release-kit/scripts/pr-title.mjs
 
   skills:
