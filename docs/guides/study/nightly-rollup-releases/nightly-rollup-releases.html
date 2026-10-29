@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nightly rollup releases — a release-kit learning walkthrough</title>
+<style>
+:root{--bg:#ffffff;--fg:#1a1a1a;--muted:#5c6370;--line:#b8bec9;--panel:#f5f6f8;--accent:#2563eb;--good:#15803d;--bad:#b91c1c}
+@media (prefers-color-scheme: dark){:root{--bg:#14161a;--fg:#e6e8ea;--muted:#9aa2ad;--line:#4a515c;--panel:#1d2027;--accent:#7aa2f7;--good:#6ccf8e;--bad:#f2777a}}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em}
+code{overflow-wrap:anywhere;background:var(--panel);padding:.05em .3em;border-radius:4px}
+pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.9rem 1rem;overflow-x:auto}
+pre code{overflow-wrap:normal;background:none;padding:0}
+a{color:var(--accent)}
+blockquote{margin:1.25rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);background:var(--panel);border-radius:0 8px 8px 0}
+blockquote p{margin:0}
+.diagram{overflow-x:auto;margin:1.5rem 0}
+.diagram svg{display:block;min-width:40rem;width:100%;height:auto}
+figcaption{color:var(--muted);font-size:.9rem;margin-top:.4rem}
+.tablewrap{overflow-x:auto;margin:1.25rem 0}
+table{border-collapse:collapse}
+th,td{border:1px solid var(--line);padding:.4rem .7rem;text-align:left}
+th{background:var(--panel)}
+hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+.shell{display:grid;grid-template-columns:17rem minmax(0,1fr);gap:1rem;max-width:78rem;margin:0 auto;padding:0 1.25rem}
+.side{position:sticky;top:0;max-height:100vh;overflow-y:auto;padding:2rem 0}
+nav.toc ol{list-style:none;padding:0;margin:0}
+nav.toc a{display:block;padding:.3rem .6rem;border-radius:6px;text-decoration:none;color:var(--muted);font-size:.9rem}
+nav.toc a.active{color:var(--fg);background:var(--panel);font-weight:600}
+nav.toc .toctitle{font-weight:700;margin:0 0 .5rem .6rem}
+main{max-width:60rem;padding:2rem 0 4rem}
+.lede{color:var(--muted)}
+.navbar,#navtoggle,.backtop{display:none}
+@media (max-width:63.99rem){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .navbar{display:block;position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--line);padding:.6rem 1.25rem}
+  .navbar label{cursor:pointer;color:var(--accent);font-weight:600}
+  .side{position:static;max-height:none;padding:1rem 0 0}
+  nav.toc{display:none}
+  #navtoggle:checked ~ .shell nav.toc{display:block}
+  .backtop{display:block}
+  main{padding-top:1rem}
+}
+
+/* bionic v3 — vendored from guide-manager assets/; do not edit here */
+.bx-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 0.5rem 0.6rem;
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+}
+.bx-panel label { display: flex; align-items: center; gap: 0.4rem; }
+.bx-panel .bx-more {
+  margin-top: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.bx-panel .bx-more::before { content: '\25B8\00A0'; }
+.bx-panel .bx-more[aria-expanded='true']::before { content: '\25BE\00A0'; }
+#bx-opts:not([hidden]) { display: grid; gap: 0.35rem; margin-top: 0.4rem; }
+#bx-opts label { flex-wrap: wrap; color: var(--muted); }
+#bx-opts input[type='range'] { flex: 1 1 6rem; min-width: 5rem; }
+#bx-opts output { color: var(--fg); font-variant-numeric: tabular-nums; }
+
+/* The fixation prefix. Bold only — dimming the remainder to --muted, as most
+   bionic renders do, drops body prose below AA contrast on the dark theme. */
+b.bx-b { font-weight: 700; }
+
+@media (max-width: 63.99rem) {
+  .bx-panel { display: none; }
+  #navtoggle:checked ~ .shell .bx-panel { display: block; }
+}
+
+@media print {
+  .bx-panel { display: none; }
+  b.bx-b { font-weight: inherit; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="navtoggle" hidden>
+<div class="navbar"><label for="navtoggle">☰ Contents</label></div>
+<div class="shell">
+<aside class="side">
+<!-- bionic v3 — vendored from guide-manager assets/; do not edit here -->
+<div class="bx-panel">
+  <label><input type="checkbox" id="bx-on"> Bionic reading</label>
+  <button type="button" class="bx-more" aria-expanded="false" aria-controls="bx-opts" aria-label="Options">Options</button>
+  <div id="bx-opts" hidden>
+    <label>Fixation
+      <input type="range" id="bx-strength" min="20" max="80" step="5" value="50" disabled>
+      <output id="bx-strength-out" for="bx-strength" aria-live="off">50%</output>
+    </label>
+    <label>Every
+      <input type="range" id="bx-freq" min="1" max="5" step="1" value="1" disabled>
+      <output id="bx-freq-out" for="bx-freq" aria-live="off">1st</output> word
+    </label>
+  </div>
+</div>
+
+<nav class="toc" id="contents"><p class="toctitle">Contents</p><ol><li><a href="#1-per-pr-vs-rollup-one-opt-in-switch">1. Per-PR vs rollup: one opt-in switch</a></li><li><a href="#2-the-trigger-a-mode-switch-that-refuses-typos">2. The trigger: a mode switch that refuses typos</a></li><li><a href="#3-the-engine-one-walk-two-endings">3. The engine: one walk, two endings</a></li><li><a href="#4-picking-the-version-biggest-change-wins-once">4. Picking the version: biggest change wins, once</a></li><li><a href="#5-the-tag-message-one-tag-many-prs-old-readers-still-parse-it">5. The tag message: one tag, many PRs, old readers still parse it</a></li><li><a href="#6-where-the-notes-come-from-and-the-none-opt-out">6. Where the notes come from, and the <code>None</code> opt-out</a></li><li><a href="#7-reading-it-back">7. Reading it back</a></li><li><a href="#8-faq-how-does-the-new-release-work">8. FAQ: &quot;How does the new release work?&quot;</a></li></ol></nav>
+</aside>
+<main>
+<h1>Nightly rollup releases — a release-kit learning walkthrough</h1>
+<p class="lede">Generated from <code>docs/guides/study/nightly-rollup-releases/nightly-rollup-releases.md</code> by <code>tools/build.mjs</code> — edit the markdown, not this file.</p>
+<p>This guide teaches how <code>mode: rollup</code> turns a day of merged PRs into one version tag and one GitHub Release, and explains <em>why</em> each piece is shaped the way it is by contrasting it with the naive alternative.</p>
+<blockquote><p>Mental model up front: in rollup mode the release engine does the same walk it always did — every first-parent commit since the last version tag, oldest first — but a releasable PR no longer gets tagged on the way past. It hands back a small <em>item</em> instead. At the end the engine cuts <strong>one</strong> tag on the newest commit, bumped by the biggest change among the items, whose message lists every item in a format both old and new readers can parse.</p></blockquote>
+<blockquote><p>Baseline: written against release-kit at commit <code>624743c</code> (2026-10-29), shortly after the rollup feature landed in #13.</p></blockquote>
+<figure class="diagram"><svg viewBox="0 0 960 250" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>A schedule or dispatch runs release-cli.ts, which walks base..target; each commit returns a RollupItem; the largest type picks the version; one tag on the target becomes the GitHub Release</title>
+  <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line)"/></marker></defs>
+  <g stroke="var(--line)" stroke-width="1.5" fill="var(--panel)">
+    <rect x="5" y="40" width="160" height="50" rx="6"/>
+    <rect x="285" y="40" width="140" height="50" rx="6"/>
+    <rect x="540" y="40" width="160" height="50" rx="6" stroke="var(--accent)"/>
+    <rect x="790" y="40" width="160" height="50" rx="6"/>
+    <rect x="545" y="170" width="150" height="50" rx="6"/>
+    <rect x="270" y="170" width="150" height="50" rx="6" stroke="var(--accent)"/>
+    <rect x="30" y="170" width="130" height="50" rx="6"/>
+  </g>
+  <g fill="var(--fg)" font-size="13" font-family="ui-monospace, Menlo, monospace" text-anchor="middle">
+    <text x="85" y="70">schedule / dispatch</text>
+    <text x="355" y="70">release-cli.ts</text>
+    <text x="620" y="70">walk base..target</text>
+    <text x="870" y="70">releaseCommit</text>
+    <text x="620" y="200">nextVersion</text>
+    <text x="345" y="200">one tag on target</text>
+    <text x="95" y="200">GitHub Release</text>
+  </g>
+  <g stroke="var(--line)" stroke-width="1.5" fill="none" marker-end="url(#a1)">
+    <line x1="165" y1="65" x2="283" y2="65"/>
+    <line x1="425" y1="65" x2="538" y2="65"/>
+    <line x1="700" y1="55" x2="788" y2="55"/>
+    <line x1="790" y1="78" x2="702" y2="78"/>
+    <line x1="620" y1="90" x2="620" y2="168"/>
+    <line x1="545" y1="195" x2="422" y2="195"/>
+    <line x1="270" y1="195" x2="162" y2="195"/>
+  </g>
+  <g fill="var(--muted)" font-size="11" font-family="system-ui, sans-serif" text-anchor="middle">
+    <text x="225" y="57">RELEASE_MODE=rollup</text>
+    <text x="482" y="57">runRelease(mode)</text>
+    <text x="745" y="47">each commit</text>
+    <text x="745" y="108">RollupItem, no tag</text>
+    <text x="630" y="135" text-anchor="start">largest type wins</text>
+    <text x="483" y="187">formatRollupMessage</text>
+    <text x="216" y="187">parseTagMessage</text>
+  </g>
+</svg><figcaption>One run, end to end: the walk collects items, and only the last step tags.</figcaption></figure>
+<hr>
+<h2 id="1-per-pr-vs-rollup-one-opt-in-switch">1. Per-PR vs rollup: one opt-in switch</h2>
+<p><strong>What it does.</strong> The reusable workflow gained a single input, <code>mode</code>, which defaults to the old behaviour:</p>
+<pre><code class="lang-yaml"># .github/workflows/release.yml:25-28
+      mode:
+        description: per-pr tags each releasable PR; rollup cuts one tag for every releasable PR in the range (README §Adopting rollup releases).
+        type: string
+        default: per-pr</code></pre>
+<p>In <code>per-pr</code> mode, each push of a <code>feat</code>, <code>fix</code> or <code>perf</code> PR to <code>main</code> wakes the workflow and cuts a version for that PR alone. In <code>rollup</code> mode, the workflow runs on a timer and cuts one version for everything merged since the last tag.</p>
+<p><strong>Why it exists.</strong> Ten releasable merges in a day are ten versions in per-PR mode, and every downstream consumer — the repos <code>bump-consumers.yml</code> opens <code>chore(deps): bump</code> PRs against — churns once per version. Rollup turns that day into one version with grouped notes.</p>
+<p><strong>The bad alternative.</strong> Keep per-PR tagging and let consumers skip most versions. That hides the noise rather than removing it: the tags, the Releases and the bump PRs still get made.</p>
+<p><strong>Trade-offs accepted.</strong> A fix now waits for the next scheduled run unless someone fires a manual dispatch. And the default stays <code>per-pr</code>, so, in the README's words, a caller that sets nothing sees no difference (<code>README.md:151</code>).</p>
+<h2 id="2-the-trigger-a-mode-switch-that-refuses-typos">2. The trigger: a mode switch that refuses typos</h2>
+<p><strong>What it does.</strong> The caller swaps its <code>push</code> trigger for a <code>schedule</code> (for example <code>cron: '0 2 * * *'</code>) plus <code>workflow_dispatch</code>, and passes <code>mode: rollup</code> (<code>README.md:153-155</code>). The workflow forwards the input as <code>RELEASE_MODE</code> (<code>release.yml:59</code>), and the CLI validates it:</p>
+<pre><code class="lang-ts">// src/release-cli.ts:107-112
+const modeEnv = process.env.RELEASE_MODE;
+if (modeEnv !== undefined &amp;&amp; modeEnv !== 'per-pr' &amp;&amp; modeEnv !== 'rollup') throw new Error(`RELEASE_MODE must be per-pr or rollup; got ${JSON.stringify(modeEnv)}`);
+const mode = modeEnv ?? 'per-pr';
+// Only a manual dispatch should hear &quot;a newer release exists&quot;; a re-run of a superseded push run must end green.
+// A scheduled run skips too: nobody is watching it, and a newer tag only means a dispatch got there first.
+const onNewer = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' ? 'reject' : 'skip';</code></pre>
+<p><strong>Why a strict check.</strong> The tempting version is &quot;anything that isn't <code>rollup</code> means <code>per-pr</code>&quot;. Then a typo such as <code>mode: rolup</code> silently tags every PR one by one — the exact thing the caller was opting out of — and nobody notices until the tags pile up. Failing fast costs one red run; silently falling back costs a stack of unwanted versions. Only an <em>unset</em> variable defaults, which keeps callers older than the input working.</p>
+<p><strong>Why <code>onNewer</code> depends on the event.</strong> When a later commit already carries a version tag, nothing is tagged either way, because versions are never assigned out of order. A dispatch has a person watching, so it fails with <code>a newer release exists: &lt;tag&gt;</code>. A scheduled run has nobody watching, and the likeliest cause is a dispatch that got there first, so it logs the same line and ends green (<code>README.md:157-158</code>).</p>
+<p><strong>Why <code>DEFAULT_BRANCH</code> has a fallback.</strong> A <code>schedule</code> event carries no <code>repository</code> payload, so <code>github.event.repository.default_branch</code> is empty there. The workflow falls back to <code>github.ref_name</code> (<code>release.yml:62</code>), which is the default branch because schedules only ever run on it. The engine needs that name to refuse a target that is not on <code>origin/&lt;default branch&gt;</code>.</p>
+<p><strong>Overlapping runs.</strong> The caller keeps the <code>concurrency</code> block from <em>Adopting releases</em>, which stops a slow scheduled run and a manual dispatch from tagging at the same time (<code>README.md:154-155</code>).</p>
+<h2 id="3-the-engine-one-walk-two-endings">3. The engine: one walk, two endings</h2>
+<p><strong>What it does.</strong> <code>runRelease</code> (<code>src/release.ts:136-180</code>) is shared by both modes, and its front half did not change: refuse a target that is not on trunk, refuse to release out of order (<code>newerRelease</code>), find the base tag with <code>git describe</code>, and list the <code>base..target</code> first-parent commits oldest first — with the base commit itself added at the front, so a baseline whose Release is missing still gets repaired.</p>
+<p>Each commit then goes through <code>releaseCommit</code>, whose first three steps are identical in both modes:</p>
+<figure class="diagram"><svg viewBox="0 0 960 300" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>A commit is already released, has no PR, or is not releasing; a releasable PR is tagged in per-PR mode or returned as a RollupItem in rollup mode</title>
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line)"/></marker></defs>
+  <g stroke="var(--line)" stroke-width="1.5" fill="var(--panel)">
+    <rect x="380" y="10" width="140" height="40" rx="6"/>
+    <rect x="10" y="120" width="190" height="50" rx="6"/>
+    <rect x="230" y="120" width="190" height="50" rx="6"/>
+    <rect x="450" y="120" width="190" height="50" rx="6"/>
+    <rect x="700" y="120" width="160" height="50" rx="25" stroke="var(--accent)"/>
+    <rect x="570" y="230" width="180" height="50" rx="6"/>
+    <rect x="790" y="230" width="160" height="50" rx="6" stroke="var(--accent)"/>
+  </g>
+  <g fill="var(--fg)" font-size="13" font-family="ui-monospace, Menlo, monospace" text-anchor="middle">
+    <text x="450" y="35">commit</text>
+    <text x="105" y="141">already-released /</text>
+    <text x="105" y="158">release-repaired</text>
+    <text x="325" y="150">no-pr, warn, continue</text>
+    <text x="545" y="150">not-releasing</text>
+    <text x="780" y="150">rollup?</text>
+    <text x="660" y="251">tag this commit</text>
+    <text x="660" y="268">+ Release</text>
+    <text x="870" y="260">return RollupItem</text>
+  </g>
+  <g stroke="var(--line)" stroke-width="1.5" fill="none" marker-end="url(#a2)">
+    <line x1="430" y1="50" x2="105" y2="118"/>
+    <line x1="440" y1="50" x2="325" y2="118"/>
+    <line x1="460" y1="50" x2="545" y2="118"/>
+    <line x1="470" y1="50" x2="780" y2="118"/>
+    <line x1="760" y1="170" x2="662" y2="228"/>
+    <line x1="800" y1="170" x2="868" y2="228"/>
+  </g>
+  <g fill="var(--muted)" font-size="11" font-family="system-ui, sans-serif">
+    <text x="99" y="110" text-anchor="end">has version tag</text>
+    <text x="319" y="110" text-anchor="end">no merged PR</text>
+    <text x="551" y="110">type not feat, fix, perf</text>
+    <text x="786" y="110">releasable PR</text>
+    <text x="688" y="205" text-anchor="end">no</text>
+    <text x="852" y="205">yes</text>
+  </g>
+</svg><figcaption>releaseCommit: the first three exits are shared by both modes; only a releasable PR forks on the mode.</figcaption></figure>
+<p>The one fork is a single line:</p>
+<pre><code class="lang-ts">// src/release.ts:110-112
+const type = check.type as ReleaseType;
+const breaking = isBreaking(check, pull.body);
+if (rollup) return { pr: pull.number, title: pull.title, type, scope: check.scope, breaking, notes: releaseNotes(pull.body) };</code></pre>
+<p>In per-PR mode the code below this line tags and releases the commit. In rollup mode the commit just reports what it would have released.</p>
+<p><strong>The bad alternative.</strong> A separate rollup engine. It would have to re-implement every safety rule — not on trunk, newer release exists, no PR means skip and carry on, a tag whose Release is missing only needs the Release — and two copies of release logic drift apart, which in release code means wrong versions.</p>
+<p><strong>What sharing buys.</strong> Rollup inherits idempotence for free. After a successful rollup, a re-run describes the rollup tag as its new base, the range after it is empty, and the only commit left to look at is already released.</p>
+<p><strong>Trade-off accepted.</strong> <code>releaseCommit</code> now returns <code>Outcome | RollupItem</code>, a union that <code>runRelease</code> tells apart with <code>'pr' in result</code> (<code>release.ts:168</code> and <code>release.ts:179</code>). A slightly awkward return type, kept so that there is only one walk.</p>
+<h2 id="4-picking-the-version-biggest-change-wins-once">4. Picking the version: biggest change wins, once</h2>
+<pre><code class="lang-ts">// src/release.ts:171-177  (compacted here)
+if (items.length) {
+  const type = RELEASE_TYPES.find((t) =&gt; items.some((i) =&gt; i.type === t)) as ReleaseType;
+  version = nextVersion(base, type, items.some((i) =&gt; i.breaking));
+  const tag = `v${version}`;
+  await pushTag(cwd, tag, target, formatRollupMessage(items));
+  await createRelease(cwd, github, tag);
+}</code></pre>
+<p><strong>What it does.</strong> <code>RELEASE_TYPES</code> is <code>['feat', 'fix', 'perf']</code> (<code>src/conventional.ts:32</code>), listed in rank order, so <code>.find</code> returns the largest type any item has. One breaking item makes the whole release breaking. <code>nextVersion</code> (<code>conventional.ts:49-55</code>) then bumps once from the base:</p>
+<div class="tablewrap"><table><thead><tr><th>Items since <code>v1.4.2</code></th><th>Rollup version</th></tr></thead><tbody><tr><td><code>fix</code>, <code>perf</code></td><td><code>v1.4.3</code></td></tr><tr><td><code>fix</code>, <code>feat</code>, <code>perf</code></td><td><code>v1.5.0</code></td></tr><tr><td>any of the above with one breaking PR</td><td><code>v2.0.0</code></td></tr><tr><td>only <code>docs</code>, <code>chore</code>, or nothing</td><td>no tag, no Release, run ends green</td></tr></tbody></table></div>
+<p>Below 1.0.0 a breaking change bumps the minor instead of the major, exactly as in per-PR mode.</p>
+<p><strong>The bad alternative.</strong> Bump once per item (1.4.2 → 1.5.0 → 1.5.1 → 1.5.2) and publish only the last. That produces version numbers that were never released, and makes the version count PRs rather than describe the change. SemVer means one release, sized by its largest change, and that is what this does.</p>
+<p><strong>Trade-off accepted.</strong> The tag lands on the <strong>target</strong> — the newest commit — and the PR commits between it and the base get no tag of their own. You cannot install &quot;just after #21&quot;; you get the nightly snapshot.</p>
+<h2 id="5-the-tag-message-one-tag-many-prs-old-readers-still-parse-it">5. The tag message: one tag, many PRs, old readers still parse it</h2>
+<p>The annotated tag message is the source of truth: the GitHub Release and every releases reader are rebuilt from it. <code>formatRollupMessage</code> (<code>conventional.ts:136-157</code>) writes it. A constructed example — #21 is <code>feat(ui)</code> with notes, #22 is a plain <code>fix</code> with none:</p>
+<pre><code class="lang-text">// example (constructed)
+Ui — 2 changes
+
+### Ui
+
+You can filter releases by type. (#21)
+
+### Other
+
+tag push retries (#22)
+
+Release-Type: feat
+Release-Items: 21:feat:ui, ~22:fix</code></pre>
+<p>The trailer block is built last:</p>
+<pre><code class="lang-ts">// src/conventional.ts:152-156
+  // RELEASE_TYPES is in rank order, so the first type any item has is the highest; breaking only adds its own trailer.
+  const trailers = [`Release-Type: ${RELEASE_TYPES.find((t) =&gt; items.some((i) =&gt; i.type === t))}`];
+  if (items.some((i) =&gt; i.breaking)) trailers.push('Release-Breaking: true');
+  trailers.push(`Release-Items: ${entries.join(', ')}`);
+  return `${subject}\n\n${body.join('\n\n')}\n\n${trailers.join('\n')}\n`;</code></pre>
+<p>Why each piece is there:</p>
+<ul><li><strong>Grouped by scope, <code>Other</code> last.</strong> The body is what a person reads in the GitHub Release, so it is organised the way a reader scans: by area.</li><li><strong>The <code>Release-Items</code> trailer is the machine index.</strong> Each entry is PR number, type, <code>!</code> when breaking, and scope; a leading <code>~</code> means the item had no notes and its text is the title with the <code>feat(ui):</code> prefix stripped. <code>parseRollupItems</code> (<code>conventional.ts:166-196</code>) walks the list against the body to split it back into per-PR items, ending each item at the first line that ends in its own <code>(#N)</code> marker.</li><li><strong>Own markers are scrubbed from the notes.</strong> Because the parser ends an item at its marker, a stray <code>(#21)</code> inside #21's own notes would cut the item short. <code>withoutOwnMarker</code> (<code>conventional.ts:126-129</code>) removes it from every line before the formatter appends the real one.</li><li><strong>No <code>Release-PR</code> or <code>Release-Scope</code> trailer, on purpose.</strong> A reader from v1.3.0 or earlier does not know <code>Release-Items</code>, so it sees a single release whose notes are the grouped body. The new format degrades into something an old reader shows sensibly, instead of something it misparses.</li><li><strong><code>--cleanup=verbatim</code> when tagging</strong> (<code>release.ts:74</code>). By default git strips lines starting with <code>#</code> from a tag message as comments, which would delete every <code>###</code> heading.</li></ul>
+<p><strong>The bad alternative.</strong> A JSON blob in the tag message. Machine-readable, but unreadable in the GitHub Release and in <code>git show</code>, and an old reader would print raw JSON as the release notes.</p>
+<h2 id="6-where-the-notes-come-from-and-the-none-opt-out">6. Where the notes come from, and the <code>None</code> opt-out</h2>
+<p>Each item's notes are its PR body's <code>## What's new</code> section, read by <code>extractWhatsNew</code> (<code>conventional.ts:61-70</code>) with HTML comments stripped first, so the template's hint never leaks into a release. <code>releaseNotes</code> then drops an explicit opt-out:</p>
+<pre><code class="lang-ts">// src/conventional.ts:72-80  (compacted here)
+export function isNoneOptOut(notes: string): boolean {
+  return /^None(\s+[—-]\s+.+)?$/i.test(notes.trim());
+}
+export function releaseNotes(body: string | null): string {
+  const notes = extractWhatsNew(body);
+  return isNoneOptOut(notes) ? '' : notes;
+}</code></pre>
+<p>A PR with no notes still appears in the rollup: its entry falls back to the title (that is the <code>~</code> in <code>Release-Items</code>).</p>
+<p><strong>The optional gate.</strong> With <code>require-notes: true</code> on the <code>ci-node.yml</code> call, the existing <code>ci / pr-title</code> check also fails a <code>feat</code>, <code>fix</code> or <code>perf</code> PR whose <code>## What's new</code> is empty or missing, via <code>checkNotes</code> (<code>conventional.ts:86</code>). Writing <code>None</code> — optionally <code>None — internal only</code> — passes the check and keeps the word out of the tag and the Release (<code>README.md:137-145</code>).</p>
+<p><strong>Why opt-in, and why <code>None</code> instead of &quot;just leave it empty&quot;.</strong> An empty section is ambiguous: forgotten, or deliberately silent? <code>None</code> makes silence an explicit choice, which is what lets the check fail the forgotten case without nagging the deliberate one. It is off by default so an existing caller sees no new red checks.</p>
+<h2 id="7-reading-it-back">7. Reading it back</h2>
+<p><code>readReleasesResult</code> (<code>src/read-releases.ts</code>) now returns <code>items</code> on every release, built from <code>parseTagMessage</code>'s new <code>items</code> field (<code>conventional.ts:202</code>): empty for the baseline tag, one item for a per-PR tag, one per PR for a rollup. Each item carries a PR <code>url</code> when the origin is GitHub. A UI can therefore show a rollup as a list of changes with links rather than one block of text, while per-PR releases look like a one-item list.</p>
+<h2 id="8-faq-how-does-the-new-release-work">8. FAQ: &quot;How does the new release work?&quot;</h2>
+<p>This was the question that started the session. Short answer: a scheduled (or manually dispatched) run of <code>release.yml</code> with <code>mode: rollup</code> walks every first-parent commit on <code>main</code> since the newest version tag. Commits whose merged PR is <code>feat</code>, <code>fix</code> or <code>perf</code> each contribute an item — type, scope, breaking flag, <code>## What's new</code> notes — instead of getting their own tag. If any items were collected, the run cuts one annotated tag on the newest commit, bumped by the largest item (breaking beats <code>feat</code> beats <code>fix</code>/<code>perf</code>), with a message grouping the items by scope and a <code>Release-Items</code> trailer indexing them, then creates the GitHub Release from that message. If nothing releasable merged, it does nothing and stays green. Everything else — the trunk check, the out-of-order guard, skipping commits with no PR, repairing a missing Release — is the per-PR engine, unchanged.</p>
+<hr>
+<p><strong>Relevant files</strong></p>
+<ul><li><code>.github/workflows/release.yml</code> — the reusable workflow; the <code>mode</code> input and the <code>DEFAULT_BRANCH</code> fallback for scheduled runs</li><li><code>src/release-cli.ts</code> — reads <code>RELEASE_MODE</code> strictly and picks <code>onNewer</code> from the event name</li><li><code>src/release.ts</code> — <code>runRelease</code> and <code>releaseCommit</code>: the shared walk, the rollup fork, the version pick and the single tag</li><li><code>src/conventional.ts</code> — <code>nextVersion</code>, <code>formatRollupMessage</code>, <code>parseTagMessage</code> / <code>parseRollupItems</code>, <code>releaseNotes</code> and <code>checkNotes</code></li><li><code>src/read-releases.ts</code> — exposes each release's <code>items</code> with PR links to readers such as a releases UI</li><li><code>scripts/pr-title.mjs</code> — the PR-title check, which runs the opt-in notes rule when <code>REQUIRE_NOTES</code> is <code>true</code></li><li><code>README.md</code> — <em>Adopting rollup releases</em> and <em>Adopting the notes check</em>, the caller-facing contract</li></ul>
+<p class="backtop"><a href="#contents">↑ back to contents</a></p>
+</main>
+</div>
+<script>
+(function(){
+  var links=[].slice.call(document.querySelectorAll('nav.toc a[href^="#"]'));
+  var heads=links.map(function(a){return document.getElementById(a.getAttribute('href').slice(1));});
+  function scroller(){var s=document.querySelector('.side'),n=document.querySelector('nav.toc');return s&&s.scrollHeight>s.clientHeight?s:n;}
+  function update(){
+    var line=window.innerHeight*0.25,idx=-1;
+    heads.forEach(function(h,i){if(h&&h.getBoundingClientRect().top<=line)idx=i;});
+    links.forEach(function(a,i){a.classList.toggle('active',i===idx);});
+    if(idx<0)return;
+    var box=scroller();if(!box||box.scrollHeight<=box.clientHeight)return;
+    var lr=links[idx].getBoundingClientRect(),br=box.getBoundingClientRect();
+    if(lr.top<br.top||lr.bottom>br.bottom)box.scrollTop+=lr.top-br.top-br.height/2;
+  }
+  window.addEventListener('scroll',update,{passive:true});window.addEventListener('resize',update);update();
+})();
+</script>
+<script>/* bionic v3 — vendored from guide-manager assets/; do not edit here */
+(function () {
+  'use strict';
+
+  var WORD = /\p{L}[\p{L}\p{M}’']*/gu;
+  // Matches a combining mark, so a bold/plain split never lands between a
+  // base character and the mark stacked on it (NFD text, e.g. combining
+  // diaeresis).
+  var MARK = /\p{M}/u;
+
+  // How many leading characters of a word to bold. Never the whole word: a
+  // fully bold word carries no fixation point, which is the only thing the
+  // bolding is for. `len` counts characters (code points), not UTF-16 code
+  // units, so an astral character (surrogate pair) counts as one — decorate()
+  // is what turns this count into the right string index.
+  //
+  // Single-letter words (the "e" in "e.g.") return 0 here and still consume a
+  // word index in decorate(): an abbreviation-heavy sentence gets a visibly
+  // irregular bold rhythm at freq >= 2. That is the spec as written, not a bug.
+  function bionicWord(word, strength) {
+    var len = Array.from(word).length;
+    if (len < 2) return 0;
+    if (len <= 3) return 1;
+    var n = Math.round(len * strength);
+    return Math.min(Math.max(n, 1), len - 1);
+  }
+
+  function shouldBold(wordIndex, freq) {
+    return wordIndex % freq === 0;
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>]/g, function (c) {
+      return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;';
+    });
+  }
+
+  // `n` is a candidate split point into `chars` (an Array.from(word)).
+  // If chars[n] is a combining mark, the split falls inside a base-plus-marks
+  // cluster and has to move: prefer extending the bold prefix past the whole
+  // run of marks, but if that run reaches the end of the word — which would
+  // leave nothing plain, violating "never bold the whole word" — back the
+  // boundary off before the cluster's base character instead. A word that is
+  // one cluster (a single base plus its marks, e.g. NFD "e" + combining
+  // acute) has no legal split at all; this returns 0 for that case, which the
+  // caller already treats the same as any other unboldable word.
+  function markSafeSplit(chars, n) {
+    if (!MARK.test(chars[n])) return n;
+    var end = n;
+    while (end < chars.length && MARK.test(chars[end])) end += 1;
+    if (end < chars.length) return end;
+    var start = n;
+    while (start > 0 && MARK.test(chars[start - 1])) start -= 1;
+    return start - 1;
+  }
+
+  // Decorate one run of plain text. Pure, string in and string out, so the whole
+  // algorithm is testable with no DOM. `start` continues the document-wide word
+  // count — that is what keeps the saccade rhythm regular across text nodes
+  // instead of restarting at every paragraph.
+  function decorate(text, strength, freq, start) {
+    var out = '';
+    var last = 0;
+    var i = start || 0;
+    var m;
+    WORD.lastIndex = 0;
+    while ((m = WORD.exec(text)) !== null) {
+      var word = m[0];
+      out += escapeHtml(text.slice(last, m.index));
+      var n = shouldBold(i, freq) ? bionicWord(word, strength) : 0;
+      var chars;
+      if (n > 0) {
+        // Slice by code point, not UTF-16 code unit: word.slice(0, n) would
+        // cut a surrogate pair in half for an astral character.
+        chars = Array.from(word);
+        n = markSafeSplit(chars, n);
+      }
+      if (n > 0) {
+        var head = chars.slice(0, n).join('');
+        var tail = chars.slice(n).join('');
+        out += '<b class="bx-b">' + escapeHtml(head) + '</b>' + escapeHtml(tail);
+      } else {
+        out += escapeHtml(word);
+      }
+      last = m.index + word.length;
+      i += 1;
+    }
+    out += escapeHtml(text.slice(last));
+    return { html: out, next: i };
+  }
+
+  var STORAGE_KEY = 'guide-manager:bionic';
+  var DEFAULTS = { on: false, strength: 0.5, freq: 1 };
+  // Headings are already bold, so there is no fixation contrast left to add
+  // (h5/h6 included: visuals.md has the generator demote every heading level
+  // by one, so a chapter's #### lands as h5); code is where mid-word bolding
+  // actively hurts. script/style/noscript never render as reader-facing
+  // text, and rewriting a textarea's value would destroy it, not decorate it.
+  var SKIP = 'pre, code, kbd, svg, script, style, noscript, textarea, h1, h2, h3, h4, h5, h6, nav.toc, .bx-panel';
+
+  function readState() {
+    try {
+      var raw = globalThis.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return { on: DEFAULTS.on, strength: DEFAULTS.strength, freq: DEFAULTS.freq };
+      var s = JSON.parse(raw);
+      var strength = typeof s.strength === 'number' && s.strength >= 0.2 && s.strength <= 0.8
+        ? s.strength : DEFAULTS.strength;
+      var freq = Number.isInteger(s.freq) && s.freq >= 1 && s.freq <= 5 ? s.freq : DEFAULTS.freq;
+      return { on: s.on === true, strength: strength, freq: freq };
+    } catch (e) {
+      // A corrupt key, or storage blocked entirely, must never take the page's
+      // other inline scripts down with it.
+      return { on: DEFAULTS.on, strength: DEFAULTS.strength, freq: DEFAULTS.freq };
+    }
+  }
+
+  function writeState(state) {
+    try {
+      globalThis.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) { /* private mode, quota, or no storage at all — not fatal */ }
+  }
+
+  function eligible(node) {
+    if (!node.nodeValue || !node.nodeValue.trim()) return false;
+    var el = node.parentElement;
+    return !!el && !el.closest(SKIP);
+  }
+
+  // Put the page back to plain text nodes. Every decorated run kept its source
+  // on data-bx-src, so this is lossless and re-running apply() after it starts
+  // from clean text rather than from already-bolded markup.
+  function restore(root) {
+    var doc = root.ownerDocument;
+    var spans = root.querySelectorAll('span.bx');
+    for (var i = 0; i < spans.length; i++) {
+      var span = spans[i];
+      var parent = span.parentNode;
+      parent.replaceChild(doc.createTextNode(span.getAttribute('data-bx-src')), span);
+      parent.normalize();
+    }
+  }
+
+  function apply(root, strength, freq) {
+    restore(root);
+    var doc = root.ownerDocument;
+    var walker = doc.createTreeWalker(root, 4 /* NodeFilter.SHOW_TEXT */);
+    var nodes = [];
+    var node;
+    // Collect first: replacing nodes while walking invalidates the walker.
+    while ((node = walker.nextNode()) !== null) {
+      if (eligible(node)) nodes.push(node);
+    }
+    var index = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      var text = nodes[i].nodeValue;
+      var res = decorate(text, strength, freq, index);
+      index = res.next;
+      var span = doc.createElement('span');
+      span.className = 'bx';
+      span.setAttribute('data-bx-src', text);
+      span.innerHTML = res.html;
+      nodes[i].parentNode.replaceChild(span, nodes[i]);
+    }
+  }
+
+  function ordinal(n) {
+    return n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : n + 'th';
+  }
+
+  // init() is both auto-invoked below and exported on __bionic, so a caller
+  // can trigger it a second time; this keeps that idempotent.
+  var bound = false;
+
+  function init() {
+    var doc = globalThis.document;
+    if (!doc) return;
+    var root = doc.querySelector('.wrap') || doc.querySelector('.shell') || doc.body;
+    if (!root) return;
+    if (bound) return; // already wired up; a second call must not double-bind every listener
+    bound = true;
+
+    var state = readState();
+
+    // The control panel is optional, and that is the whole difference from v2.
+    // A guide's own build vendors the panel markup, but guide-manager splices
+    // this script into guides that have none: a build generated before the aid
+    // existed, and a tutor deck, which has no sidebar to hang a panel off. There
+    // the app's Settings page is the only control, and the `storage` listener
+    // below is how it reaches this document. Bailing out on a missing panel — as
+    // v2 did — would mean those guides silently never decorate at all.
+    var panel = doc.querySelector('.bx-panel');
+    var onBox = doc.getElementById('bx-on');
+    var strengthEl = doc.getElementById('bx-strength');
+    var freqEl = doc.getElementById('bx-freq');
+    var opts = doc.getElementById('bx-opts');
+    var strengthOut = doc.getElementById('bx-strength-out');
+    var freqOut = doc.getElementById('bx-freq-out');
+    var moreBtn = panel && panel.querySelector('.bx-more');
+    // All or nothing: a half-present panel is a broken build, and wiring up the
+    // half that exists would put controls on screen that do not work.
+    var hasPanel = !!(panel && onBox && strengthEl && freqEl && opts && strengthOut && freqOut && moreBtn);
+
+    function paint() {
+      if (state.on) apply(root, state.strength, state.freq);
+      else restore(root);
+    }
+
+    function render() {
+      if (!hasPanel) return;
+      strengthOut.textContent = strengthEl.value + '%';
+      var freqWord = ordinal(Number(freqEl.value));
+      freqOut.textContent = freqWord;
+      freqEl.setAttribute('aria-valuetext', freqWord + ' word');
+      strengthEl.disabled = !onBox.checked;
+      freqEl.disabled = !onBox.checked;
+    }
+
+    function syncControls() {
+      if (!hasPanel) return;
+      onBox.checked = state.on;
+      strengthEl.value = String(Math.round(state.strength * 100));
+      freqEl.value = String(state.freq);
+    }
+
+    if (hasPanel) {
+      syncControls();
+
+      // A full guide is ~15k spans, so a rebuild per drag frame stutters: the
+      // readout follows `input`, the rewrite waits for `change`.
+      var commit = function () {
+        state = {
+          on: onBox.checked,
+          strength: Number(strengthEl.value) / 100,
+          freq: Number(freqEl.value),
+        };
+        writeState(state);
+        render();
+        paint();
+      };
+
+      onBox.addEventListener('change', commit);
+      strengthEl.addEventListener('change', commit);
+      freqEl.addEventListener('change', commit);
+      strengthEl.addEventListener('input', render);
+      freqEl.addEventListener('input', render);
+      moreBtn.addEventListener('click', function () {
+        var open = moreBtn.getAttribute('aria-expanded') === 'true';
+        moreBtn.setAttribute('aria-expanded', String(!open));
+        opts.hidden = open;
+      });
+    }
+
+    // The central Settings page lives in another document — the app shell, which
+    // may be framing this very guide. localStorage is per-origin, so a write
+    // there raises a `storage` event here, and that is what lets an
+    // already-open guide repaint instead of waiting for a reload. Reads the key
+    // rather than the event's newValue: readState() is the one place the stored
+    // shape is validated, and a hand-edited value must fall back the same way on
+    // this path as on every other. A panel, where one exists, keeps working as a
+    // local override — it writes the same key, so both routes converge on one
+    // state, and syncing the controls here stops the panel from showing a stale
+    // value and silently undoing the change on its next commit().
+    //
+    // Guarded on the function's existence because the panel-less path reaches
+    // this line on documents v2 bailed out of well before it — including a host
+    // that provides a `document` and nothing else.
+    if (typeof globalThis.addEventListener === 'function') {
+      globalThis.addEventListener('storage', function (e) {
+        if (e.key !== STORAGE_KEY) return;
+        state = readState();
+        syncControls();
+        render();
+        paint();
+      });
+    }
+
+    render();
+    if (state.on) apply(root, state.strength, state.freq);
+  }
+
+  if (globalThis.document) {
+    if (globalThis.document.readyState === 'loading') {
+      globalThis.document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  }
+
+  globalThis.__bionic = {
+    bionicWord: bionicWord,
+    shouldBold: shouldBold,
+    decorate: decorate,
+    readState: readState,
+    apply: apply,
+    restore: restore,
+    init: init,
+  };
+})();
+</script>
+</body>
+</html>
